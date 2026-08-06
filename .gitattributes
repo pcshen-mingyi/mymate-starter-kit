@@ -1,0 +1,8 @@
+# 統一換行為 LF，避免 Windows 取檔變成 CRLF 導致腳本解析異常
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary
+*.xlsx binary
+*.docx binary
+*.pptx binary

@@ -1,0 +1,68 @@
+{
+  "_note": "⚠️ 實測（2026-08-05）：桌面 App 下本檔案（專案層級）的 permissions 與 hooks 不生效（host 以 --setting-sources user 啟動）；裝到使用者層級 ~/.claude/ 才會生效。→ 在 my-install 執行前，安全防線是 CLAUDE.md 的安全底線 + safety-check skill 程序 + App 內建確認。終端機 CLI 啟動時本檔案正常生效。",
+  "autoInstallEnabledPlugins": true,
+  "enabledPlugins": [
+    "claude-code-setup@claude-plugins-official"
+  ],
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(./_private/**)",
+      "Write(./_private/**)",
+      "Edit(./_private/**)",
+      "Read(./_raw/**)",
+      "Write(./_raw/**)",
+      "Edit(./_raw/**)"
+    ],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(mv *)",
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(curl *)",
+      "Bash(wget *)"
+    ],
+    "allow": [
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(pwd)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/block-delete.mjs"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/block-sensitive.mjs"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|WebFetch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/confirm-send.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}

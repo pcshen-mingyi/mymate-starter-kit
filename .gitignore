@@ -1,0 +1,5 @@
+# macOS 檔案總管產生的隱藏檔
+.DS_Store
+
+# 個人本機設定，不隨包發佈（每台電腦各自產生）
+.claude/settings.local.json
