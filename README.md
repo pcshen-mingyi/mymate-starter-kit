@@ -171,3 +171,18 @@ MYmate-小白包/
 - 要調整護欄範圍：`.claude/hooks/_config.mjs` 的 `PROTECTED_DIRS`、`PROTECTED_FILE_PATTERNS`、`OUTBOUND_*`。
 - 要調整預裝 plugin：`.claude/settings.json` 的 `enabledPlugins`。
 - 版本紀錄見 `CHANGELOG.md`。
+
+### 發佈新版本
+
+公開發佈位置：<https://github.com/pcshen-mingyi/mymate-starter-kit>
+（同事拿到的下載連結固定指向「最新版本」，改版後不用重發連結。）
+
+```bash
+git add -A
+git commit -m "docs: 更新說明"
+git push
+git archive --format=zip -9 --prefix="MYmate-小白包/" -o /tmp/MYmate-starter-kit.zip HEAD
+gh release create v0.2 /tmp/MYmate-starter-kit.zip --title "MYmate 小白包 v0.2" --notes "更新內容…"
+```
+
+zip 附件檔名必須固定為 `MYmate-starter-kit.zip`，否則舊連結會失效。
