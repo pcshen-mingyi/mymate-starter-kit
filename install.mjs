@@ -20,6 +20,7 @@ import { homedir, platform } from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { sendStat, statsNotice } from "./_stats.mjs";
 
 const DRY = process.argv.includes("--dry-run");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -339,9 +340,13 @@ async function main() {
     await fs.writeFile(MANIFEST, JSON.stringify(manifest, null, 2) + "\n", "utf8");
   }
 
+  await sendStat("install", DRY);
+
   log("\n" + "━".repeat(56));
   log(DRY ? " DRY RUN 結束，未修改任何檔案。" : " 安裝完成！請完全關掉 Claude App 再重開（Mac 按 Cmd+Q）。");
   log("━".repeat(56));
+  const notice = statsNotice();
+  if (notice) log("\n" + notice);
   if (!DRY) {
     log("\n如需完整還原（settings + skills + hooks）：node uninstall.mjs");
     log("先看會做什麼：node uninstall.mjs --dry-run");

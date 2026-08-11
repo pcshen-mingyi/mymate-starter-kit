@@ -25,6 +25,7 @@ import { homedir, platform } from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { sendStat, statsNotice } from "./_stats.mjs";
 
 const DRY = process.argv.includes("--dry-run");
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -265,9 +266,13 @@ async function main() {
     ok("已清除安裝紀錄");
   }
 
+  await sendStat("uninstall", DRY);
+
   log("\n" + "━".repeat(56));
   log(DRY ? " DRY RUN 結束，未修改任何檔案。" : " 還原完成！請完全關掉 Claude App 再重開（Mac 按 Cmd+Q）。");
   log("━".repeat(56));
+  const notice = statsNotice();
+  if (notice) log("\n" + notice);
   if (!foundPlugins.length) {
     log("\n註：若之後發現仍有本包帶進來的 plugin，可在 Claude 對話框執行：");
     log("    /plugin uninstall claude-code-setup@claude-plugins-official");
