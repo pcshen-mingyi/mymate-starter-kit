@@ -3,3 +3,9 @@
 
 # 個人本機設定，不隨包發佈（每台電腦各自產生）
 .claude/settings.local.json
+
+# clasp 的專案設定檔含 Apps Script 專案 ID，這是 repo 唯一不能收的檔案。
+# 需要它的時候用 clasp clone 產生（見 docs/統計設定-給維護者.md）。
+.clasp.json
+backend/.clasp.json
+.clasprc.json

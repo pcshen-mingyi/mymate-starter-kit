@@ -201,6 +201,7 @@ export MYMATE_NO_STATS=1
 - 要調整預裝 plugin：`.claude/settings.json` 的 `enabledPlugins`。
 - 版本紀錄見 `CHANGELOG.md`。
 - 匿名計數**已啟用**（端點已部署並填入 `_stats.mjs`）；設定與關閉方式見 `docs/統計設定-給維護者.md`。
+- 統計後端的原始碼在 `backend/`（維護者用，不會進同事下載的 zip）。
 
 ### 發佈新版本
 

@@ -6,3 +6,7 @@
 *.xlsx binary
 *.docx binary
 *.pptx binary
+
+# 統計後端的原始碼：維護者才需要，不放進同事下載的 zip
+# （docs/ 不排除——README 有引用 docs/統計設定-給維護者.md，排掉會變死連結）
+backend/ export-ignore
