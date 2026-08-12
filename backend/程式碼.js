@@ -209,20 +209,12 @@ function setup() {
   st.getRange(WEEKLY_ROW, 8, WEEKLY_WEEKS, 1).setNumberFormat("yyyy-mm-dd");
 
   // ── 版本與平台分布（動態，冒出沒預期的值也看得到）─────────────
+  // 空狀態同樣先用 COUNTA 判斷。QUERY 對空範圍不會回 #N/A，
+  // 而是回「只有標籤列」的結果，所以 IFERROR 也接不到（跟 MIN／MAX 同一類陷阱）。
   st.getRange(wLast + 3, 8).setValue("版本分布").setFontWeight("bold");
-  st.getRange(wLast + 4, 8).setFormula(
-    '=IFERROR(QUERY(' + q + "C2:C," +
-      '"select Col1, count(Col1) where Col1 is not null and Col1 <> \'\' ' +
-      "group by Col1 order by count(Col1) desc " +
-      'label Col1 \'版本\', count(Col1) \'筆數\'"),"（還沒有資料）")'
-  );
+  st.getRange(wLast + 4, 8).setFormula(distFormula(q, "C", "版本"));
   st.getRange(wLast + 3, 11).setValue("平台分布").setFontWeight("bold");
-  st.getRange(wLast + 4, 11).setFormula(
-    '=IFERROR(QUERY(' + q + "D2:D," +
-      '"select Col1, count(Col1) where Col1 is not null and Col1 <> \'\' ' +
-      "group by Col1 order by count(Col1) desc " +
-      'label Col1 \'平台\', count(Col1) \'筆數\'"),"（還沒有資料）")'
-  );
+  st.getRange(wLast + 4, 11).setFormula(distFormula(q, "D", "平台"));
 
   // 快照的標籤與時間戳跟每日表格共用欄位，寬度要能容納「Windows（win32）」
   // 與「2026-08-11 15:39」——設太窄會被截斷成「Windows（win」「2026-08-11 15」。
@@ -263,6 +255,20 @@ function countifsBody(q, event, row) {
   return (
     'COUNTIFS(' + q + '$B:$B,"' + event + '",' +
     q + '$A:$A,"<"&$A' + row + "+1)"
+  );
+}
+
+/**
+ * 分布表（版本／平台）。空資料時直接顯示「（還沒有資料）」。
+ * @param col 資料分頁的欄位字母（C＝版本、D＝平台）
+ */
+function distFormula(q, col, label) {
+  return (
+    "=IF(COUNTA(" + q + col + '2:' + col + ')=0,"（還沒有資料）",' +
+    "QUERY(" + q + col + "2:" + col + "," +
+    '"select Col1, count(Col1) where Col1 is not null and Col1 <> \'\' ' +
+    "group by Col1 order by count(Col1) desc " +
+    "label Col1 '" + label + "', count(Col1) '筆數'\"))"
   );
 }
 
