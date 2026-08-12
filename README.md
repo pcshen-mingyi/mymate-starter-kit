@@ -1,4 +1,4 @@
-# MYmate 小白包 v0.1
+# MYmate 小白包 v2.0
 
 給**第一次用 Claude Code** 的同事：下載這個資料夾、用 Claude Code 打開它，就可以開始用。
 打開後會有一位叫 **MYmate** 的 AI 使用小幫手帶你完成前置準備。
