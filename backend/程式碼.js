@@ -127,17 +127,21 @@ function setup() {
   st.getRange("E6").setValue("其他／不明");
   st.getRange("F6").setFormula("=COUNTA(" + q + "B2:B)-B6-D6");
 
+  // 空狀態一定要先用 COUNTA 判斷有沒有資料，不能靠 IFERROR。
+  // MIN／MAX 對空範圍回傳 0（不是錯誤），IFERROR 接不到；
+  // 0 又會被日期格式渲染成 1899-12-30，「距今」則變成 46245 天，看起來像壞掉。
+  var hasData = "COUNTA(" + q + "A2:A)=0";
   st.getRange("A7").setValue("首筆事件");
   st.getRange("B7").setFormula(
-    '=IFERROR(TEXT(MIN(' + q + 'A2:A),"yyyy-mm-dd hh:mm"),"—")'
+    "=IF(" + hasData + ',"—",TEXT(MIN(' + q + 'A2:A),"yyyy-mm-dd hh:mm"))'
   );
   st.getRange("C7").setValue("最近事件");
   st.getRange("D7").setFormula(
-    '=IFERROR(TEXT(MAX(' + q + 'A2:A),"yyyy-mm-dd hh:mm"),"—")'
+    "=IF(" + hasData + ',"—",TEXT(MAX(' + q + 'A2:A),"yyyy-mm-dd hh:mm"))'
   );
   st.getRange("E7").setValue("最近事件距今");
   st.getRange("F7").setFormula(
-    '=IFERROR(TODAY()-INT(MAX(' + q + 'A2:A))&" 天","—")'
+    "=IF(" + hasData + ',"—",TODAY()-INT(MAX(' + q + 'A2:A))&" 天")'
   );
 
   // 近 60 天每日安裝的迷你走勢，放在快照裡（一眼看一格就好）
