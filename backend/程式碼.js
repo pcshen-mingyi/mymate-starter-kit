@@ -297,3 +297,189 @@ function clearAllData() {
   sh.deleteRows(2, last - 1);
   Logger.log("已清除 " + (last - 1) + " 列資料，標題列保留。");
 }
+
+// ───────────────────────────────────────────────────────────────
+// 下載追蹤（v2.1）—— 每天抓一次 GitHub Release 的累計下載數
+//
+// 與安裝／卸載計數完全獨立：這裡失敗不會影響 doPost 的寫入。
+// 任何錯誤都只寫 Logger 然後安靜結束——拋錯會讓每日觸發器寄失敗信。
+// ───────────────────────────────────────────────────────────────
+
+var GITHUB_RELEASES_API =
+  "https://api.github.com/repos/pcshen-mingyi/mymate-starter-kit/releases";
+var DOWNLOAD_SHEET = "下載";
+var DOWNLOAD_HEADERS = ["抓取時間", "版本(tag)", "資產名稱", "累計下載", "當日新增"];
+var DOWNLOAD_TRIGGER_FN = "fetchDownloads";
+
+/** 「下載」分頁；不存在就建，標題列不存在就補 */
+function downloadSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(DOWNLOAD_SHEET) || ss.insertSheet(DOWNLOAD_SHEET);
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(DOWNLOAD_HEADERS);
+    sh.getRange(1, 1, 1, DOWNLOAD_HEADERS.length).setFontWeight("bold");
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+/**
+ * fetchDownloads()：抓 GitHub Release 的累計下載數，每個資產一天一列。
+ * 由每日觸發器呼叫，也可以手動執行。同一天重複執行只會更新，不會新增重複列。
+ */
+function fetchDownloads() {
+  var res;
+  try {
+    res = UrlFetchApp.fetch(GITHUB_RELEASES_API, {
+      muteHttpExceptions: true,
+      headers: { Accept: "application/vnd.github+json" },
+    });
+  } catch (err) {
+    Logger.log("下載追蹤：連線失敗，本次跳過（不寫入）。" + err);
+    return;
+  }
+
+  var code = res.getResponseCode();
+  if (code !== 200) {
+    Logger.log("下載追蹤：GitHub 回應 " + code + "，本次跳過（不寫入）。");
+    return;
+  }
+
+  var releases;
+  try {
+    releases = JSON.parse(res.getContentText());
+  } catch (err) {
+    Logger.log("下載追蹤：JSON 解析失敗，本次跳過（不寫入）。");
+    return;
+  }
+  if (!releases || !releases.length) {
+    Logger.log("下載追蹤：沒有任何 Release，本次跳過（不寫入）。");
+    return;
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = ss.getSpreadsheetTimeZone();
+  var now = new Date();
+  var today = Utilities.formatDate(now, tz, "yyyy-MM-dd");
+
+  var sh = downloadSheet();
+  var plan = planDownloadWrites(readDownloadRows(sh, tz), releases, today);
+  if (!plan.length) {
+    Logger.log("下載追蹤：Release 裡沒有任何資產可記錄，本次跳過（不寫入）。");
+    return;
+  }
+
+  for (var i = 0; i < plan.length; i++) {
+    var p = plan[i];
+    var range = sh.getRange(p.row, 1, 1, 5);
+    // 版本(tag) 與資產名稱存文字，否則 "2.0" 會被判成數字 2（與 writeRow 同一理由）
+    range.setNumberFormats([["yyyy/mm/dd hh:mm:ss", "@", "@", "0", "0"]]);
+    // 當日新增沒有前一天可比時寫空字串。空值與 0 是兩件事，不能用 0 冒充：
+    // 填 0 會被讀成「那天沒人下載」，實際上是「還沒有基準可以比」。
+    range.setValues([
+      [now, p.tag, p.asset, p.total, p.delta === null ? "" : p.delta],
+    ]);
+  }
+  Logger.log(
+    "下載追蹤：更新 " + countPlan(plan, true) + " 列、新增 " + countPlan(plan, false) + " 列。"
+  );
+}
+
+/** 讀出「下載」分頁現有資料列，轉成純資料好做判斷 */
+function readDownloadRows(sh, tz) {
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var values = sh.getRange(2, 1, last - 1, 5).getValues();
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var v = values[i];
+    out.push({
+      dateStr:
+        v[0] instanceof Date
+          ? Utilities.formatDate(v[0], tz, "yyyy-MM-dd")
+          : String(v[0]).slice(0, 10),
+      tag: String(v[1]),
+      asset: String(v[2]),
+      total: Number(v[3]),
+    });
+  }
+  return out;
+}
+
+/**
+ * 決定每個資產要寫在哪一列、當日新增是多少。
+ * 抽成純函式是為了能在本機直接驗證這兩條最容易做錯的規則：
+ *
+ *  1. 同一天重複執行要「更新那一列」而不是新增。觸發器可能因重試一天跑多次，
+ *     每次都 append 的話「當日新增」會全部算錯，錯誤還會累積到後面每一天。
+ *  2. 當日新增要跟「前一天的快照」比，不能跟今天早先那次比
+ *     （跟今天自己比，重跑就會變成 0）。找不到前一天就回 null → 寫空白，不要寫 0。
+ *
+ * 假設資料列按時間先後排列（正常寫入就是這樣）。
+ * 若資產被刪掉重新上傳，GitHub 的計數會歸零，此時差值會是負數——
+ * 那是真實事件，刻意不遮蓋。
+ *
+ * @param existing 現有資料列 [{dateStr, tag, asset, total}]，順序即列序（第 2 列起）
+ * @param releases GitHub API 的 releases 陣列
+ * @param today    今天的 yyyy-MM-dd
+ * @return [{row, isUpdate, tag, asset, total, delta}]
+ */
+function planDownloadWrites(existing, releases, today) {
+  var plan = [];
+  var nextRow = existing.length + 2;
+
+  for (var i = 0; i < releases.length; i++) {
+    var rel = releases[i];
+    var assets = rel.assets || [];
+    for (var j = 0; j < assets.length; j++) {
+      var tag = String(rel.tag_name);
+      var name = String(assets[j].name);
+      var total = Number(assets[j].download_count);
+
+      var todayRow = null;
+      var prevTotal = null;
+      for (var k = 0; k < existing.length; k++) {
+        var e = existing[k];
+        if (e.tag !== tag || e.asset !== name) continue;
+        if (e.dateStr === today) todayRow = k + 2;
+        else prevTotal = e.total; // 順著掃，留下最近一筆「不是今天」的
+      }
+
+      plan.push({
+        row: todayRow === null ? nextRow++ : todayRow,
+        isUpdate: todayRow !== null,
+        tag: tag,
+        asset: name,
+        total: total,
+        delta: prevTotal === null ? null : total - prevTotal,
+      });
+    }
+  }
+  return plan;
+}
+
+function countPlan(plan, isUpdate) {
+  var n = 0;
+  for (var i = 0; i < plan.length; i++) if (plan[i].isUpdate === isUpdate) n++;
+  return n;
+}
+
+/**
+ * setupTrigger()：裝每日觸發器（台北時間 06:00 前後）。
+ * 重複執行安全——會先刪掉既有的同名觸發器，不會愈疊愈多。
+ */
+function setupTrigger() {
+  var all = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].getHandlerFunction() === DOWNLOAD_TRIGGER_FN) {
+      ScriptApp.deleteTrigger(all[i]);
+      removed++;
+    }
+  }
+  ScriptApp.newTrigger(DOWNLOAD_TRIGGER_FN).timeBased().atHour(6).everyDays(1).create();
+  Logger.log(
+    "已刪除舊的同名觸發器 " + removed + " 個，並建立每日 06:00 執行 " +
+      DOWNLOAD_TRIGGER_FN + " 的觸發器 1 個。"
+  );
+}
