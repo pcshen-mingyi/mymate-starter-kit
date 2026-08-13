@@ -68,7 +68,8 @@ function ok() {
 // ───────────────────────────────────────────────────────────────
 
 var DAILY_DAYS = 60; // 每日趨勢的天數
-var DAILY_ROW = 11; // 每日表格第一列
+var FUNNEL_ROW = 11; // 漏斗第一列（在即時快照下方）
+var DAILY_ROW = 21; // 每日表格第一列（在漏斗與判讀說明下方）
 var WEEKLY_WEEKS = 12; // 每週彙總的週數
 var WEEKLY_ROW = 27; // 每週表格第一列（在圖表下方）
 
@@ -88,6 +89,10 @@ function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var data = sheet(); // 順便確保標題列存在
   var q = "'" + data.getName().replace(/'/g, "''") + "'!"; // 公式用的分頁前綴
+  // 漏斗與「當日下載」都要引用「下載」分頁。先確保它存在，
+  // 否則 fetchDownloads() 還沒跑過時，那些公式會變成 #REF!。
+  downloadSheet();
+  var dl = "'" + DOWNLOAD_SHEET.replace(/'/g, "''") + "'!";
 
   // 資料分頁的版本與平台欄一律文字格式（writeRow 已逐列設定，這裡是雙重保險）
   data.getRange(1, 3, data.getMaxRows(), 2).setNumberFormat("@");
@@ -150,14 +155,49 @@ function setup() {
   st.getRange("B8:F8").merge();
   st.getRange("B8").setFormula("=SPARKLINE(B" + DAILY_ROW + ":B" + lastDaily + ")");
 
+  // ── 漏斗：下載 → 安裝 → 卸載 ───────────────────────────────
+  var fr = FUNNEL_ROW;
+  st.getRange(fr - 1, 1).setValue("漏斗（累計）").setFontWeight("bold");
+  st.getRange(fr, 1).setValue("累計下載");
+  st.getRange(fr, 2).setFormula(totalDownloads(dl));
+  st.getRange(fr + 1, 1).setValue("累計安裝");
+  st.getRange(fr + 1, 2).setFormula("=B5");
+  st.getRange(fr + 2, 1).setValue("安裝率（安裝 ÷ 下載）");
+  st.getRange(fr + 2, 2).setFormula(
+    "=IF(B" + fr + '=0,"—",B' + (fr + 1) + "/B" + fr + ")"
+  );
+  st.getRange(fr + 3, 1).setValue("累計卸載");
+  st.getRange(fr + 3, 2).setFormula("=D5");
+  st.getRange(fr + 4, 1).setValue("卸載率（卸載 ÷ 安裝）");
+  st.getRange(fr + 4, 2).setFormula(
+    "=IF(B" + (fr + 1) + '=0,"—",B' + (fr + 3) + "/B" + (fr + 1) + ")"
+  );
+  st.getRange(fr + 5, 1).setValue("淨留存（次數）");
+  st.getRange(fr + 5, 2).setFormula("=F5");
+  st.getRange(fr + 2, 2).setNumberFormat("0.0%");
+  st.getRange(fr + 4, 2).setNumberFormat("0.0%");
+
+  // 判讀說明——不可省略。兩個偏差方向相反，所以絕對百分比不可靠。
+  st.getRange(fr + 6, 1, 1, 6).merge();
+  st.getRange(fr + 6, 1)
+    .setValue(
+      "下載與安裝都是「次數」，同一個基準（皆非不重複人數）。" +
+        "差別在於下載含爬蟲，而爬蟲不會安裝——所以安裝率會系統性偏低。" +
+        "另一個方向：下載每天只抓一次、安裝是即時寫入，所以剛釋出的頭一兩天安裝率會反而虛高。" +
+        "看趨勢變化比看絕對數字可靠。"
+    )
+    .setWrap(true)
+    .setFontSize(9)
+    .setFontColor("#666666");
+
   // ── 每日趨勢（連續日期軸，沒事件的日子補 0）──────────────────
-  st.getRange("A9")
+  st.getRange(DAILY_ROW - 2, 1)
     .setValue("每日趨勢（近 " + DAILY_DAYS + " 天，含沒有事件的日子＝0）")
     .setFontWeight("bold");
-  st.getRange(DAILY_ROW - 1, 1, 1, 5).setValues([
-    ["日期", "當日安裝", "當日卸載", "累計安裝", "累計淨留存"],
+  st.getRange(DAILY_ROW - 1, 1, 1, 6).setValues([
+    ["日期", "當日安裝", "當日卸載", "累計安裝", "累計淨留存", "當日下載"],
   ]);
-  st.getRange(DAILY_ROW - 1, 1, 1, 5).setFontWeight("bold").setBackground("#f1f3f4");
+  st.getRange(DAILY_ROW - 1, 1, 1, 6).setFontWeight("bold").setBackground("#f1f3f4");
 
   var daily = [];
   for (var d = 0; d < DAILY_DAYS; d++) {
@@ -168,9 +208,10 @@ function setup() {
       dayCount(q, "uninstall", r),
       upToCount(q, "install", r),
       netUpTo(q, r),
+      dayDownloads(dl, r),
     ]);
   }
-  st.getRange(DAILY_ROW, 1, DAILY_DAYS, 5).setFormulas(daily);
+  st.getRange(DAILY_ROW, 1, DAILY_DAYS, 6).setFormulas(daily);
   st.getRange(DAILY_ROW, 1, DAILY_DAYS, 1).setNumberFormat("yyyy-mm-dd");
 
   // ── 折線圖：累計趨勢（放在右上角，一眼看走勢）─────────────────
@@ -269,6 +310,41 @@ function distFormula(q, col, label) {
     '"select Col1, count(Col1) where Col1 is not null and Col1 <> \'\' ' +
     "group by Col1 order by count(Col1) desc " +
     "label Col1 '" + label + "', count(Col1) '筆數'\"))"
+  );
+}
+
+/**
+ * 累計下載＝每個資產只取一個值，再加總。
+ *
+ * 「下載」分頁每一列都是當下的絕對值快照，所以**不能整欄加總**——
+ * 同一資產不同天的快照相加會嚴重高估。
+ * 用 max() group by 版本+資產：GitHub 的計數只增不減，所以 max 等於最新值，
+ * 而且不依賴列的排序（手動編輯過也不會錯）。
+ *
+ * 唯一例外：資產被刪掉重新上傳時計數會歸零，此時 max 會保留歸零前的高值而高估。
+ * 那種情況很罕見，而且發生時「下載」分頁會出現負的「較上次新增」，看得出來。
+ */
+function totalDownloads(dl) {
+  return (
+    "=IFERROR(SUM(QUERY(" + dl + "B2:D," +
+    '"select max(Col3) group by Col1, Col2 label max(Col3) \'\'"' +
+    ")),0)"
+  );
+}
+
+/**
+ * 某一天的下載新增（日期在 A 欄該列），跨資產加總。
+ *
+ * 「那天沒抓到」與「那天 0 次下載」是兩件事，所以要先判斷那天有沒有
+ * **非空**的「較上次新增」——第一次抓取雖然有列，但差值是空的（還沒有基準），
+ * 那天仍然是未知，不能顯示 0。
+ */
+function dayDownloads(dl, row) {
+  var from = dl + '$A:$A,">="&$A' + row;
+  var to = dl + '$A:$A,"<"&$A' + row + "+1";
+  return (
+    "=IF(COUNTIFS(" + from + "," + to + "," + dl + '$E:$E,"<>")=0,"",' +
+    "SUMIFS(" + dl + "$E:$E," + from + "," + to + "))"
   );
 }
 
