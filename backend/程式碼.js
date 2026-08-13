@@ -308,16 +308,30 @@ function clearAllData() {
 var GITHUB_RELEASES_API =
   "https://api.github.com/repos/pcshen-mingyi/mymate-starter-kit/releases";
 var DOWNLOAD_SHEET = "下載";
-var DOWNLOAD_HEADERS = ["抓取時間", "版本(tag)", "資產名稱", "累計下載", "當日新增"];
+var DOWNLOAD_HEADERS = ["抓取時間", "版本(tag)", "資產名稱", "累計下載", "較上次新增"];
 var DOWNLOAD_TRIGGER_FN = "fetchDownloads";
 
-/** 「下載」分頁；不存在就建，標題列不存在就補 */
+/**
+ * 每日抓取的時段（24 小時制）。設在深夜是刻意的：
+ *
+ * 差值＝兩次抓取之間的新增，所以抓取時間決定了那一列涵蓋哪段時間。
+ * 早上 6 點抓的話，寫在 8/13 那列的差值其實是 8/12 06:00 → 8/13 06:00，
+ * 裡面有 8/12 的 18 小時、只有 8/13 的 6 小時——標著 8/13、內容主要是前一天。
+ * 改成深夜抓，窗口幾乎等於當天 00:00–23:xx，才能跟即時寫入的安裝事件按日對齊。
+ *
+ * 附帶好處：早上看漏斗時，下載數最多只落後幾小時，而不是整整一天。
+ */
+var DOWNLOAD_TRIGGER_HOUR = 23;
+
+/** 「下載」分頁；不存在就建。標題列缺漏或改過名稱也會一併補正 */
 function downloadSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName(DOWNLOAD_SHEET) || ss.insertSheet(DOWNLOAD_SHEET);
-  if (sh.getLastRow() === 0) {
-    sh.appendRow(DOWNLOAD_HEADERS);
-    sh.getRange(1, 1, 1, DOWNLOAD_HEADERS.length).setFontWeight("bold");
+  var head = sh.getRange(1, 1, 1, DOWNLOAD_HEADERS.length);
+  // 分隔字元要用看得見的字元。用 NUL（\0）當分隔雖然能跑，
+  // 但會讓整個檔案在 grep 眼中變成二進位檔而被跳過，機密掃描就失效了。
+  if (head.getValues()[0].join("|") !== DOWNLOAD_HEADERS.join("|")) {
+    head.setValues([DOWNLOAD_HEADERS]).setFontWeight("bold");
     sh.setFrozenRows(1);
   }
   return sh;
@@ -374,8 +388,9 @@ function fetchDownloads() {
     var range = sh.getRange(p.row, 1, 1, 5);
     // 版本(tag) 與資產名稱存文字，否則 "2.0" 會被判成數字 2（與 writeRow 同一理由）
     range.setNumberFormats([["yyyy/mm/dd hh:mm:ss", "@", "@", "0", "0"]]);
-    // 當日新增沒有前一天可比時寫空字串。空值與 0 是兩件事，不能用 0 冒充：
+    // 沒有前一次可比時寫空字串。空值與 0 是兩件事，不能用 0 冒充：
     // 填 0 會被讀成「那天沒人下載」，實際上是「還沒有基準可以比」。
+    // 同理，某天漏抓就留空，那天的量會併進下一次成功抓取的差值裡。
     range.setValues([
       [now, p.tag, p.asset, p.total, p.delta === null ? "" : p.delta],
     ]);
@@ -465,8 +480,9 @@ function countPlan(plan, isUpdate) {
 }
 
 /**
- * setupTrigger()：裝每日觸發器（台北時間 06:00 前後）。
+ * setupTrigger()：裝每日觸發器（時段見 DOWNLOAD_TRIGGER_HOUR）。
  * 重複執行安全——會先刪掉既有的同名觸發器，不會愈疊愈多。
+ * 改過時段後要重跑一次，舊觸發器才會被換掉。
  */
 function setupTrigger() {
   var all = ScriptApp.getProjectTriggers();
@@ -477,9 +493,13 @@ function setupTrigger() {
       removed++;
     }
   }
-  ScriptApp.newTrigger(DOWNLOAD_TRIGGER_FN).timeBased().atHour(6).everyDays(1).create();
+  ScriptApp.newTrigger(DOWNLOAD_TRIGGER_FN)
+    .timeBased()
+    .atHour(DOWNLOAD_TRIGGER_HOUR)
+    .everyDays(1)
+    .create();
   Logger.log(
-    "已刪除舊的同名觸發器 " + removed + " 個，並建立每日 06:00 執行 " +
-      DOWNLOAD_TRIGGER_FN + " 的觸發器 1 個。"
+    "已刪除舊的同名觸發器 " + removed + " 個，並建立每日 " +
+      DOWNLOAD_TRIGGER_HOUR + ":00 前後執行 " + DOWNLOAD_TRIGGER_FN + " 的觸發器 1 個。"
   );
 }
