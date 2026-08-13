@@ -72,6 +72,9 @@ var FUNNEL_ROW = 11; // 漏斗第一列（在即時快照下方）
 var DAILY_ROW = 21; // 每日表格第一列（在漏斗與判讀說明下方）
 var WEEKLY_WEEKS = 12; // 每週彙總的週數
 var WEEKLY_ROW = 27; // 每週表格第一列（在圖表下方）
+// 右側區塊（圖表、每週彙總、分布）的起始欄。每日表格已經佔到第 8 欄（H），
+// 所以右側從第 10 欄（J）起，中間留一欄空白當間隔。
+var RIGHT_COL = 10;
 
 /**
  * setup()：建立（或重建）「統計」分頁。可以重複執行，不會壞。
@@ -108,10 +111,10 @@ function setup() {
   }
 
   // ── 說明（兩行，永遠放最上面）──────────────────────────────
-  st.getRange("A1:G1").merge().setValue(
+  st.getRange("A1:H1").merge().setValue(
     "這是「次數」不是「人數」。無識別碼，同一人重裝會重複計算，安裝與卸載無法配對。"
   );
-  st.getRange("A2:G2").merge().setValue(
+  st.getRange("A2:H2").merge().setValue(
     "數字只是訊號——它能告訴你「該去問了」，不能告訴你「為什麼」。要知道原因得靠訪談與課後回饋。"
   );
   st.getRange("A1:A2").setWrap(true).setFontColor("#8a6d1b").setBackground("#fff8e1");
@@ -152,7 +155,7 @@ function setup() {
   // 近 60 天每日安裝的迷你走勢，放在快照裡（一眼看一格就好）
   var lastDaily = DAILY_ROW + DAILY_DAYS - 1;
   st.getRange("A8").setValue("近 " + DAILY_DAYS + " 天每日安裝走勢");
-  st.getRange("B8:G8").merge();
+  st.getRange("B8:H8").merge();
   st.getRange("B8").setFormula("=SPARKLINE(C" + DAILY_ROW + ":C" + lastDaily + ")");
 
   // ── 漏斗：下載 → 安裝 → 卸載 ───────────────────────────────
@@ -184,7 +187,7 @@ function setup() {
   st.getRange(fr, 3, 1, 2).setFontSize(9).setFontColor("#666666");
 
   // 判讀說明——不可省略。兩個偏差方向相反，所以絕對百分比不可靠。
-  st.getRange(fr + 6, 1, 1, 7).merge();
+  st.getRange(fr + 6, 1, 1, 8).merge();
   st.getRange(fr + 6, 1)
     .setValue(
       "下載與安裝都是「次數」，同一個基準（皆非不重複人數）。" +
@@ -201,12 +204,15 @@ function setup() {
   st.getRange(DAILY_ROW - 2, 1)
     .setValue("每日趨勢（近 " + DAILY_DAYS + " 天，含沒有事件的日子＝0）")
     .setFontWeight("bold");
-  // 欄位順序照漏斗由左而右：下載 → 安裝 → 卸載 → 累計 → 轉換率。
+  // 欄位順序照漏斗由左而右：下載 → 安裝 → 卸載 → 累計 → 兩個比率。
   // 反過來排（安裝在下載左邊）讀起來會跟漏斗打架。
-  st.getRange(DAILY_ROW - 1, 1, 1, 7).setValues([
-    ["日期", "當日下載", "當日安裝", "當日卸載", "累計安裝", "累計淨留存", "轉換率"],
+  st.getRange(DAILY_ROW - 1, 1, 1, 8).setValues([
+    [
+      "日期", "當日下載", "當日安裝", "當日卸載",
+      "累計安裝", "累計淨留存", "安裝率", "卸載率",
+    ],
   ]);
-  st.getRange(DAILY_ROW - 1, 1, 1, 7).setFontWeight("bold").setBackground("#f1f3f4");
+  st.getRange(DAILY_ROW - 1, 1, 1, 8).setFontWeight("bold").setBackground("#f1f3f4");
 
   var daily = [];
   for (var d = 0; d < DAILY_DAYS; d++) {
@@ -218,12 +224,13 @@ function setup() {
       dayCount(q, "uninstall", r),
       upToCount(q, "install", r),
       netUpTo(q, r),
-      dayConversion(r),
+      dayInstallRate(r),
+      dayUninstallRate(r),
     ]);
   }
-  st.getRange(DAILY_ROW, 1, DAILY_DAYS, 7).setFormulas(daily);
+  st.getRange(DAILY_ROW, 1, DAILY_DAYS, 8).setFormulas(daily);
   st.getRange(DAILY_ROW, 1, DAILY_DAYS, 1).setNumberFormat("yyyy-mm-dd");
-  st.getRange(DAILY_ROW, 7, DAILY_DAYS, 1).setNumberFormat("0.0%");
+  st.getRange(DAILY_ROW, 7, DAILY_DAYS, 2).setNumberFormat("0.0%");
 
   // ── 折線圖：累計趨勢（放在右上角，一眼看走勢）─────────────────
   var chart = st
@@ -232,7 +239,7 @@ function setup() {
     .addRange(st.getRange(DAILY_ROW - 1, 1, DAILY_DAYS + 1, 1)) // 日期
     .addRange(st.getRange(DAILY_ROW - 1, 5, DAILY_DAYS + 1, 2)) // 累計安裝、累計淨留存
     .setNumHeaders(1)
-    .setPosition(4, 8, 0, 0) // 第 4 列、第 H 欄
+    .setPosition(4, RIGHT_COL, 0, 0) // 第 4 列、右側區塊起始欄
     .setOption("title", "累計趨勢（次數，非人數）")
     .setOption("width", 620)
     .setOption("height", 300)
@@ -242,31 +249,32 @@ function setup() {
 
   // ── 每週彙總（事件稀疏時用這個看，比每日穩）──────────────────
   var wLast = WEEKLY_ROW + WEEKLY_WEEKS - 1;
-  st.getRange(WEEKLY_ROW - 2, 8)
+  st.getRange(WEEKLY_ROW - 2, RIGHT_COL)
     .setValue("每週彙總（近 " + WEEKLY_WEEKS + " 週，週一為起始）")
     .setFontWeight("bold");
-  st.getRange(WEEKLY_ROW - 1, 8, 1, 3).setValues([["週起始", "安裝", "卸載"]]);
-  st.getRange(WEEKLY_ROW - 1, 8, 1, 3).setFontWeight("bold").setBackground("#f1f3f4");
+  st.getRange(WEEKLY_ROW - 1, RIGHT_COL, 1, 3).setValues([["週起始", "安裝", "卸載"]]);
+  st.getRange(WEEKLY_ROW - 1, RIGHT_COL, 1, 3).setFontWeight("bold").setBackground("#f1f3f4");
 
+  var weekCol = String.fromCharCode(64 + RIGHT_COL); // 週起始所在欄的字母
   var weekly = [];
   for (var w = 0; w < WEEKLY_WEEKS; w++) {
     var wr = WEEKLY_ROW + w;
     weekly.push([
       "=TODAY()-WEEKDAY(TODAY(),3)-" + 7 * (WEEKLY_WEEKS - 1 - w),
-      weekCount(q, "install", wr),
-      weekCount(q, "uninstall", wr),
+      weekCount(q, "install", wr, weekCol),
+      weekCount(q, "uninstall", wr, weekCol),
     ]);
   }
-  st.getRange(WEEKLY_ROW, 8, WEEKLY_WEEKS, 3).setFormulas(weekly);
-  st.getRange(WEEKLY_ROW, 8, WEEKLY_WEEKS, 1).setNumberFormat("yyyy-mm-dd");
+  st.getRange(WEEKLY_ROW, RIGHT_COL, WEEKLY_WEEKS, 3).setFormulas(weekly);
+  st.getRange(WEEKLY_ROW, RIGHT_COL, WEEKLY_WEEKS, 1).setNumberFormat("yyyy-mm-dd");
 
   // ── 版本與平台分布（動態，冒出沒預期的值也看得到）─────────────
   // 空狀態同樣先用 COUNTA 判斷。QUERY 對空範圍不會回 #N/A，
   // 而是回「只有標籤列」的結果，所以 IFERROR 也接不到（跟 MIN／MAX 同一類陷阱）。
-  st.getRange(wLast + 3, 8).setValue("版本分布").setFontWeight("bold");
-  st.getRange(wLast + 4, 8).setFormula(distFormula(q, "C", "版本"));
-  st.getRange(wLast + 3, 11).setValue("平台分布").setFontWeight("bold");
-  st.getRange(wLast + 4, 11).setFormula(distFormula(q, "D", "平台"));
+  st.getRange(wLast + 3, RIGHT_COL).setValue("版本分布").setFontWeight("bold");
+  st.getRange(wLast + 4, RIGHT_COL).setFormula(distFormula(q, "C", "版本"));
+  st.getRange(wLast + 3, RIGHT_COL + 3).setValue("平台分布").setFontWeight("bold");
+  st.getRange(wLast + 4, RIGHT_COL + 3).setFormula(distFormula(q, "D", "平台"));
 
   // 快照的標籤與時間戳跟每日表格共用欄位，寬度要能容納「Windows（win32）」
   // 與「2026-08-11 15:39」——設太窄會被截斷成「Windows（win」「2026-08-11 15」。
@@ -277,6 +285,7 @@ function setup() {
   st.setColumnWidth(5, 130);
   st.setColumnWidth(6, 130);
   st.setColumnWidth(7, 90);
+  st.setColumnWidth(8, 90);
   ss.setActiveSheet(st);
   Logger.log(
     "統計分頁已重建（資料分頁：" + data.getName() +
@@ -345,15 +354,27 @@ function totalDownloads(dl) {
 }
 
 /**
- * 當日轉換率＝當日安裝 ÷ 當日下載（B＝當日下載、C＝當日安裝）。
+ * 當日安裝率＝當日安裝 ÷ 當日下載（B＝當日下載、C＝當日安裝）。
  *
  * 分母是空白（那天沒抓到）或 0（抓到了但沒人下載）時一律顯示「—」：
- * 兩種情況都算不出比率，硬算會變成 #DIV/0! 或誤導性的 0%。
+ * 兩種情況都算不出比率，硬算會變成 #DIV/0!；而填 0% 更糟，
+ * 那會被讀成「有人下載卻沒人安裝」，實際上是「根本沒人下載」。
  */
-function dayConversion(row) {
+function dayInstallRate(row) {
   return (
     '=IF(OR($B' + row + '="",$B' + row + '=0),"—",$C' + row + "/$B" + row + ")"
   );
+}
+
+/**
+ * 當日卸載率＝當日卸載 ÷ 當日安裝（C＝當日安裝、D＝當日卸載）。
+ * 當日安裝為 0 時顯示「—」（那天沒有安裝，卸載率沒有意義）。
+ *
+ * 注意這是「當日卸載 ÷ 當日安裝」，不是同一批人的留存率——
+ * 沒有識別碼，無法把某次卸載對應到某次安裝，某天的卸載很可能來自更早的安裝。
+ */
+function dayUninstallRate(row) {
+  return '=IF($C' + row + '=0,"—",$D' + row + "/$C" + row + ")";
 }
 
 /** 下載數的基準日＝最大的統計日。沒有資料就顯示「—」 */
@@ -380,11 +401,11 @@ function dayDownloads(dl, row) {
 }
 
 /** 某一週（起始日在 H 欄該列）的事件數 */
-function weekCount(q, event, row) {
+function weekCount(q, event, row, col) {
   return (
     '=COUNTIFS(' + q + '$B:$B,"' + event + '",' +
-    q + '$A:$A,">="&$H' + row + "," +
-    q + '$A:$A,"<"&$H' + row + "+7)"
+    q + '$A:$A,">="&$' + col + row + "," +
+    q + '$A:$A,"<"&$' + col + row + '+7)'
   );
 }
 
