@@ -177,14 +177,21 @@ function setup() {
   st.getRange(fr + 2, 2).setNumberFormat("0.0%");
   st.getRange(fr + 4, 2).setNumberFormat("0.0%");
 
+  // 分母的基準日。安裝是即時的、下載每天才抓一次，
+  // 所以看安裝率之前要先知道下載數統計到哪一天。
+  st.getRange(fr, 3).setValue("下載統計至");
+  st.getRange(fr, 4).setFormula(downloadsAsOf(dl));
+  st.getRange(fr, 3, 1, 2).setFontSize(9).setFontColor("#666666");
+
   // 判讀說明——不可省略。兩個偏差方向相反，所以絕對百分比不可靠。
   st.getRange(fr + 6, 1, 1, 6).merge();
   st.getRange(fr + 6, 1)
     .setValue(
       "下載與安裝都是「次數」，同一個基準（皆非不重複人數）。" +
         "差別在於下載含爬蟲，而爬蟲不會安裝——所以安裝率會系統性偏低。" +
-        "另一個方向：下載每天只抓一次、安裝是即時寫入，所以剛釋出的頭一兩天安裝率會反而虛高。" +
-        "看趨勢變化比看絕對數字可靠。"
+        "另一個方向：安裝是即時寫入、下載每天才抓一次（見右方「下載統計至」），" +
+        "所以分母比分子舊，剛釋出的頭一兩天安裝率會反而虛高。" +
+        "看趨勢變化比看絕對數字可靠；要比較單日或單週的比例，用下方按統計日對齊的表格。"
     )
     .setWrap(true)
     .setFontSize(9)
@@ -326,9 +333,16 @@ function distFormula(q, col, label) {
  */
 function totalDownloads(dl) {
   return (
-    "=IFERROR(SUM(QUERY(" + dl + "B2:D," +
+    "=IFERROR(SUM(QUERY(" + dl + "C2:E," +
     '"select max(Col3) group by Col1, Col2 label max(Col3) \'\'"' +
     ")),0)"
+  );
+}
+
+/** 下載數的基準日＝最大的統計日。沒有資料就顯示「—」 */
+function downloadsAsOf(dl) {
+  return (
+    "=IF(COUNTA(" + dl + 'A2:A)=0,"—",TEXT(MAX(' + dl + 'A2:A),"yyyy-mm-dd"))'
   );
 }
 
@@ -340,11 +354,11 @@ function totalDownloads(dl) {
  * 那天仍然是未知，不能顯示 0。
  */
 function dayDownloads(dl, row) {
-  var from = dl + '$A:$A,">="&$A' + row;
-  var to = dl + '$A:$A,"<"&$A' + row + "+1";
+  // 統計日是純日期，所以直接等值比對；不必再用 >=X 且 <X+1 去掃時間戳
+  var sameDay = dl + "$A:$A,$A" + row;
   return (
-    "=IF(COUNTIFS(" + from + "," + to + "," + dl + '$E:$E,"<>")=0,"",' +
-    "SUMIFS(" + dl + "$E:$E," + from + "," + to + "))"
+    "=IF(COUNTIFS(" + sameDay + "," + dl + '$F:$F,"<>")=0,"",' +
+    "SUMIFS(" + dl + "$F:$F," + sameDay + "))"
   );
 }
 
@@ -384,7 +398,30 @@ function clearAllData() {
 var GITHUB_RELEASES_API =
   "https://api.github.com/repos/pcshen-mingyi/mymate-starter-kit/releases";
 var DOWNLOAD_SHEET = "下載";
-var DOWNLOAD_HEADERS = ["抓取時間", "版本(tag)", "資產名稱", "累計下載", "較上次新增"];
+
+/**
+ * 「統計日」與「抓取時間」是兩件事，必須分開存：
+ *
+ *   統計日    這一列的數字代表哪一天的狀態（as-of）。分析、漏斗、按日對齊都看這一欄。
+ *   抓取時間  我們實際去問 GitHub 的時刻（載入時間）。只用來查問題、判斷資料多新。
+ *
+ * 混在一欄的話，每次讀表都得先想「這一列其實是哪天」。分開之後：
+ *   - 公式從區間比對（>=X 且 <X+1）變成等值比對（=X），不容易寫錯
+ *   - 同一個統計日重複抓就是更新那一列，所以白天手動跑過、晚上排程再跑，
+ *     最後留下的是 23:00 那個較完整的值——手動執行會自動被修正
+ */
+var DOWNLOAD_HEADERS = [
+  "統計日",
+  "抓取時間",
+  "版本(tag)",
+  "資產名稱",
+  "累計下載",
+  "較上次新增",
+];
+
+/** v2.1 早期的欄位結構（沒有「統計日」），用來偵測並自動升級 */
+var DOWNLOAD_HEADERS_V1 = ["抓取時間", "版本(tag)", "資產名稱", "累計下載", "較上次新增"];
+
 var DOWNLOAD_TRIGGER_FN = "fetchDownloads";
 
 /**
@@ -399,16 +436,38 @@ var DOWNLOAD_TRIGGER_FN = "fetchDownloads";
  */
 var DOWNLOAD_TRIGGER_HOUR = 23;
 
-/** 「下載」分頁；不存在就建。標題列缺漏或改過名稱也會一併補正 */
+/** 「下載」分頁；不存在就建。舊欄位結構會自動升級，標題列改名也會補正 */
 function downloadSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName(DOWNLOAD_SHEET) || ss.insertSheet(DOWNLOAD_SHEET);
-  var head = sh.getRange(1, 1, 1, DOWNLOAD_HEADERS.length);
+
+  // 舊結構（沒有「統計日」）→ 在最前面插一欄，並用抓取時間的日期回填。
+  // 不能只換標題列，那會讓既有資料整排錯位。
+  var v1 = sh.getRange(1, 1, 1, DOWNLOAD_HEADERS_V1.length).getValues()[0];
+  if (v1.join("|") === DOWNLOAD_HEADERS_V1.join("|")) {
+    sh.insertColumnBefore(1);
+    var last = sh.getLastRow();
+    if (last >= 2) {
+      var fetched = sh.getRange(2, 2, last - 1, 1).getValues();
+      var asOf = [];
+      for (var i = 0; i < fetched.length; i++) {
+        var t = fetched[i][0];
+        // 統計日＝抓取時間的日期部分（去掉時分秒）
+        asOf.push([t instanceof Date ? new Date(t.getFullYear(), t.getMonth(), t.getDate()) : ""]);
+      }
+      sh.getRange(2, 1, asOf.length, 1).setValues(asOf).setNumberFormat("yyyy-mm-dd");
+    }
+    Logger.log("「下載」分頁已升級：新增「統計日」欄，並用抓取時間回填。");
+  }
+
   // 分隔字元要用看得見的字元。用 NUL（\0）當分隔雖然能跑，
   // 但會讓整個檔案在 grep 眼中變成二進位檔而被跳過，機密掃描就失效了。
+  var head = sh.getRange(1, 1, 1, DOWNLOAD_HEADERS.length);
   if (head.getValues()[0].join("|") !== DOWNLOAD_HEADERS.join("|")) {
     head.setValues([DOWNLOAD_HEADERS]).setFontWeight("bold");
     sh.setFrozenRows(1);
+    sh.setColumnWidth(1, 100);
+    sh.setColumnWidth(2, 150);
   }
   return sh;
 }
@@ -451,6 +510,7 @@ function fetchDownloads() {
   var tz = ss.getSpreadsheetTimeZone();
   var now = new Date();
   var today = Utilities.formatDate(now, tz, "yyyy-MM-dd");
+  var asOf = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // 統計日＝今天
 
   var sh = downloadSheet();
   var plan = planDownloadWrites(readDownloadRows(sh, tz), releases, today);
@@ -461,14 +521,16 @@ function fetchDownloads() {
 
   for (var i = 0; i < plan.length; i++) {
     var p = plan[i];
-    var range = sh.getRange(p.row, 1, 1, 5);
+    var range = sh.getRange(p.row, 1, 1, 6);
     // 版本(tag) 與資產名稱存文字，否則 "2.0" 會被判成數字 2（與 writeRow 同一理由）
-    range.setNumberFormats([["yyyy/mm/dd hh:mm:ss", "@", "@", "0", "0"]]);
+    range.setNumberFormats([
+      ["yyyy-mm-dd", "yyyy/mm/dd hh:mm:ss", "@", "@", "0", "0"],
+    ]);
     // 沒有前一次可比時寫空字串。空值與 0 是兩件事，不能用 0 冒充：
     // 填 0 會被讀成「那天沒人下載」，實際上是「還沒有基準可以比」。
     // 同理，某天漏抓就留空，那天的量會併進下一次成功抓取的差值裡。
     range.setValues([
-      [now, p.tag, p.asset, p.total, p.delta === null ? "" : p.delta],
+      [asOf, now, p.tag, p.asset, p.total, p.delta === null ? "" : p.delta],
     ]);
   }
   Logger.log(
@@ -476,11 +538,14 @@ function fetchDownloads() {
   );
 }
 
-/** 讀出「下載」分頁現有資料列，轉成純資料好做判斷 */
+/**
+ * 讀出「下載」分頁現有資料列，轉成純資料好做判斷。
+ * 日期一律取「統計日」（A 欄），不是抓取時間——分析與比對都以統計日為基準。
+ */
 function readDownloadRows(sh, tz) {
   var last = sh.getLastRow();
   if (last < 2) return [];
-  var values = sh.getRange(2, 1, last - 1, 5).getValues();
+  var values = sh.getRange(2, 1, last - 1, 6).getValues();
   var out = [];
   for (var i = 0; i < values.length; i++) {
     var v = values[i];
@@ -489,9 +554,9 @@ function readDownloadRows(sh, tz) {
         v[0] instanceof Date
           ? Utilities.formatDate(v[0], tz, "yyyy-MM-dd")
           : String(v[0]).slice(0, 10),
-      tag: String(v[1]),
-      asset: String(v[2]),
-      total: Number(v[3]),
+      tag: String(v[2]),
+      asset: String(v[3]),
+      total: Number(v[4]),
     });
   }
   return out;
