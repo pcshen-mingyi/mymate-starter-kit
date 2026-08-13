@@ -108,10 +108,10 @@ function setup() {
   }
 
   // ── 說明（兩行，永遠放最上面）──────────────────────────────
-  st.getRange("A1:F1").merge().setValue(
+  st.getRange("A1:G1").merge().setValue(
     "這是「次數」不是「人數」。無識別碼，同一人重裝會重複計算，安裝與卸載無法配對。"
   );
-  st.getRange("A2:F2").merge().setValue(
+  st.getRange("A2:G2").merge().setValue(
     "數字只是訊號——它能告訴你「該去問了」，不能告訴你「為什麼」。要知道原因得靠訪談與課後回饋。"
   );
   st.getRange("A1:A2").setWrap(true).setFontColor("#8a6d1b").setBackground("#fff8e1");
@@ -152,8 +152,8 @@ function setup() {
   // 近 60 天每日安裝的迷你走勢，放在快照裡（一眼看一格就好）
   var lastDaily = DAILY_ROW + DAILY_DAYS - 1;
   st.getRange("A8").setValue("近 " + DAILY_DAYS + " 天每日安裝走勢");
-  st.getRange("B8:F8").merge();
-  st.getRange("B8").setFormula("=SPARKLINE(B" + DAILY_ROW + ":B" + lastDaily + ")");
+  st.getRange("B8:G8").merge();
+  st.getRange("B8").setFormula("=SPARKLINE(C" + DAILY_ROW + ":C" + lastDaily + ")");
 
   // ── 漏斗：下載 → 安裝 → 卸載 ───────────────────────────────
   var fr = FUNNEL_ROW;
@@ -184,7 +184,7 @@ function setup() {
   st.getRange(fr, 3, 1, 2).setFontSize(9).setFontColor("#666666");
 
   // 判讀說明——不可省略。兩個偏差方向相反，所以絕對百分比不可靠。
-  st.getRange(fr + 6, 1, 1, 6).merge();
+  st.getRange(fr + 6, 1, 1, 7).merge();
   st.getRange(fr + 6, 1)
     .setValue(
       "下載與安裝都是「次數」，同一個基準（皆非不重複人數）。" +
@@ -201,32 +201,36 @@ function setup() {
   st.getRange(DAILY_ROW - 2, 1)
     .setValue("每日趨勢（近 " + DAILY_DAYS + " 天，含沒有事件的日子＝0）")
     .setFontWeight("bold");
-  st.getRange(DAILY_ROW - 1, 1, 1, 6).setValues([
-    ["日期", "當日安裝", "當日卸載", "累計安裝", "累計淨留存", "當日下載"],
+  // 欄位順序照漏斗由左而右：下載 → 安裝 → 卸載 → 累計 → 轉換率。
+  // 反過來排（安裝在下載左邊）讀起來會跟漏斗打架。
+  st.getRange(DAILY_ROW - 1, 1, 1, 7).setValues([
+    ["日期", "當日下載", "當日安裝", "當日卸載", "累計安裝", "累計淨留存", "轉換率"],
   ]);
-  st.getRange(DAILY_ROW - 1, 1, 1, 6).setFontWeight("bold").setBackground("#f1f3f4");
+  st.getRange(DAILY_ROW - 1, 1, 1, 7).setFontWeight("bold").setBackground("#f1f3f4");
 
   var daily = [];
   for (var d = 0; d < DAILY_DAYS; d++) {
     var r = DAILY_ROW + d;
     daily.push([
       "=TODAY()-" + (DAILY_DAYS - 1 - d),
+      dayDownloads(dl, r),
       dayCount(q, "install", r),
       dayCount(q, "uninstall", r),
       upToCount(q, "install", r),
       netUpTo(q, r),
-      dayDownloads(dl, r),
+      dayConversion(r),
     ]);
   }
-  st.getRange(DAILY_ROW, 1, DAILY_DAYS, 6).setFormulas(daily);
+  st.getRange(DAILY_ROW, 1, DAILY_DAYS, 7).setFormulas(daily);
   st.getRange(DAILY_ROW, 1, DAILY_DAYS, 1).setNumberFormat("yyyy-mm-dd");
+  st.getRange(DAILY_ROW, 7, DAILY_DAYS, 1).setNumberFormat("0.0%");
 
   // ── 折線圖：累計趨勢（放在右上角，一眼看走勢）─────────────────
   var chart = st
     .newChart()
     .setChartType(Charts.ChartType.LINE)
     .addRange(st.getRange(DAILY_ROW - 1, 1, DAILY_DAYS + 1, 1)) // 日期
-    .addRange(st.getRange(DAILY_ROW - 1, 4, DAILY_DAYS + 1, 2)) // 累計安裝、累計淨留存
+    .addRange(st.getRange(DAILY_ROW - 1, 5, DAILY_DAYS + 1, 2)) // 累計安裝、累計淨留存
     .setNumHeaders(1)
     .setPosition(4, 8, 0, 0) // 第 4 列、第 H 欄
     .setOption("title", "累計趨勢（次數，非人數）")
@@ -271,7 +275,8 @@ function setup() {
   st.setColumnWidth(3, 145);
   st.setColumnWidth(4, 145);
   st.setColumnWidth(5, 130);
-  st.setColumnWidth(6, 110);
+  st.setColumnWidth(6, 130);
+  st.setColumnWidth(7, 90);
   ss.setActiveSheet(st);
   Logger.log(
     "統計分頁已重建（資料分頁：" + data.getName() +
@@ -336,6 +341,18 @@ function totalDownloads(dl) {
     "=IFERROR(SUM(QUERY(" + dl + "C2:E," +
     '"select max(Col3) group by Col1, Col2 label max(Col3) \'\'"' +
     ")),0)"
+  );
+}
+
+/**
+ * 當日轉換率＝當日安裝 ÷ 當日下載（B＝當日下載、C＝當日安裝）。
+ *
+ * 分母是空白（那天沒抓到）或 0（抓到了但沒人下載）時一律顯示「—」：
+ * 兩種情況都算不出比率，硬算會變成 #DIV/0! 或誤導性的 0%。
+ */
+function dayConversion(row) {
+  return (
+    '=IF(OR($B' + row + '="",$B' + row + '=0),"—",$C' + row + "/$B" + row + ")"
   );
 }
 
