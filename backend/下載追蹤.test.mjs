@@ -19,7 +19,7 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), "程式碼.js");
 // Google 服務的空殼，只為了讓檔案能被 eval
 const stubs = [
   "SpreadsheetApp", "ContentService", "UrlFetchApp",
-  "Logger", "Charts", "ScriptApp", "Utilities", "Session",
+  "Logger", "Charts", "ScriptApp", "Utilities", "Session", "PropertiesService",
 ];
 const fn = new Function(
   ...stubs,

@@ -518,6 +518,72 @@ var DOWNLOAD_HEADERS_V1 = ["抓取時間", "版本(tag)", "資產名稱", "累�
 var DOWNLOAD_TRIGGER_FN = "fetchDownloads";
 
 /**
+ * GitHub token 的存放位置：**指令碼屬性**，不是原始碼。
+ * `backend/` 在公開 repo 裡，任何寫進程式碼的字串都等於公開。
+ *
+ * 為什麼需要：未授權的 GitHub API 是 60 次/小時、**以 IP 計算**。
+ * Apps Script 的對外請求從 Google 的共用 IP 出去，那 60 次會被同一個 IP 上
+ * 其他人的腳本用光，我們就跟著吃 403——實測約一半的日子抓不到。
+ * 我們一天只打兩次，所以降低自己的頻率完全沒用。
+ * 授權後額度變成 5,000 次/小時、以 token 計算，與 IP 無關。
+ *
+ * 這個 token **不需要任何權限**（建 classic PAT 時所有 scope 都不勾）——
+ * 我們只讀公開 repo 的 releases，它純粹是一張「額度身分證」。
+ *
+ * 設定：Apps Script 編輯器 → 專案設定 → 指令碼屬性 → 新增 GITHUB_TOKEN。
+ * 沒設定也能跑，只是退回未授權的 60 次/小時。
+ */
+var GITHUB_TOKEN_PROPERTY = "GITHUB_TOKEN";
+
+/** 組請求標頭；有 token 就帶上。token 本身絕不寫進 Logger。 */
+function githubHeaders() {
+  var headers = { Accept: "application/vnd.github+json" };
+  var token = null;
+  try {
+    token = PropertiesService.getScriptProperties().getProperty(GITHUB_TOKEN_PROPERTY);
+  } catch (err) {
+    token = null; // 讀不到就當作沒設定，不要讓統計拖垮流程
+  }
+  if (token) {
+    // 從介面貼上時常常會夾帶換行或空白，會讓標頭整個失效
+    token = String(token).trim();
+    if (token) headers.Authorization = "Bearer " + token;
+  }
+  return headers;
+}
+
+/**
+ * 從回應標頭整理額度資訊，讓執行紀錄一眼看得出是不是被限流。
+ * 只讀 x-ratelimit-* 標頭，不會碰也不會記錄 token。
+ */
+function rateLimitNote(res) {
+  try {
+    var h = res.getAllHeaders();
+    var pick = function (name) {
+      return h[name] !== undefined ? h[name] : h[name.toUpperCase()];
+    };
+    var limit = pick("x-ratelimit-limit");
+    var left = pick("x-ratelimit-remaining");
+    var reset = pick("x-ratelimit-reset");
+    if (limit === undefined && left === undefined) return "";
+
+    var note = " 額度 " + left + "/" + limit;
+    if (reset) {
+      var tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+      note += "，重置於 " +
+        Utilities.formatDate(new Date(Number(reset) * 1000), tz, "HH:mm");
+    }
+    if (String(limit) === "60") {
+      note += "（未授權：額度以 IP 計算、與其他 Apps Script 使用者共用。" +
+        "設定指令碼屬性 " + GITHUB_TOKEN_PROPERTY + " 可提高到 5000）";
+    }
+    return note;
+  } catch (err) {
+    return "";
+  }
+}
+
+/**
  * 每日抓取的時段（24 小時制）。設在深夜是刻意的：
  *
  * 差值＝兩次抓取之間的新增，所以抓取時間決定了那一列涵蓋哪段時間。
@@ -592,7 +658,7 @@ function fetchOneSource(src) {
   try {
     res = UrlFetchApp.fetch(src.api, {
       muteHttpExceptions: true,
-      headers: { Accept: "application/vnd.github+json" },
+      headers: githubHeaders(),
     });
   } catch (err) {
     Logger.log(label + "連線失敗，本次跳過（不寫入）。" + err);
@@ -601,7 +667,9 @@ function fetchOneSource(src) {
 
   var code = res.getResponseCode();
   if (code !== 200) {
-    Logger.log(label + "GitHub 回應 " + code + "，本次跳過（不寫入）。");
+    Logger.log(
+      label + "GitHub 回應 " + code + "，本次跳過（不寫入）。" + rateLimitNote(res)
+    );
     return;
   }
 
@@ -645,7 +713,8 @@ function fetchOneSource(src) {
     ]);
   }
   Logger.log(
-    label + "更新 " + countPlan(plan, true) + " 列、新增 " + countPlan(plan, false) + " 列。"
+    label + "更新 " + countPlan(plan, true) + " 列、新增 " +
+      countPlan(plan, false) + " 列。" + rateLimitNote(res)
   );
 }
 
