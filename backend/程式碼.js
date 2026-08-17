@@ -252,21 +252,33 @@ function setup() {
   st.getRange(WEEKLY_ROW - 2, RIGHT_COL)
     .setValue("每週彙總（近 " + WEEKLY_WEEKS + " 週，週一為起始）")
     .setFontWeight("bold");
-  st.getRange(WEEKLY_ROW - 1, RIGHT_COL, 1, 3).setValues([["週起始", "安裝", "卸載"]]);
-  st.getRange(WEEKLY_ROW - 1, RIGHT_COL, 1, 3).setFontWeight("bold").setBackground("#f1f3f4");
+  // 欄位順序與每日表格一致：下載 → 安裝 → 卸載 → 兩個比率
+  st.getRange(WEEKLY_ROW - 1, RIGHT_COL, 1, 6).setValues([
+    ["週起始", "下載", "安裝", "卸載", "安裝率", "卸載率"],
+  ]);
+  st.getRange(WEEKLY_ROW - 1, RIGHT_COL, 1, 6).setFontWeight("bold").setBackground("#f1f3f4");
 
-  var weekCol = String.fromCharCode(64 + RIGHT_COL); // 週起始所在欄的字母
+  // 這些欄位彼此互相引用，欄位字母要從 RIGHT_COL 算出來，不能寫死
+  var cw = String.fromCharCode(64 + RIGHT_COL); // 週起始
+  var cd = String.fromCharCode(65 + RIGHT_COL); // 下載
+  var ci = String.fromCharCode(66 + RIGHT_COL); // 安裝
+  var cu = String.fromCharCode(67 + RIGHT_COL); // 卸載
+
   var weekly = [];
   for (var w = 0; w < WEEKLY_WEEKS; w++) {
     var wr = WEEKLY_ROW + w;
     weekly.push([
       "=TODAY()-WEEKDAY(TODAY(),3)-" + 7 * (WEEKLY_WEEKS - 1 - w),
-      weekCount(q, "install", wr, weekCol),
-      weekCount(q, "uninstall", wr, weekCol),
+      weekDownloads(dl, wr, cw),
+      weekCount(q, "install", wr, cw),
+      weekCount(q, "uninstall", wr, cw),
+      rateFormula(cd, ci, wr), // 安裝率＝安裝 ÷ 下載
+      rateFormula(ci, cu, wr), // 卸載率＝卸載 ÷ 安裝
     ]);
   }
-  st.getRange(WEEKLY_ROW, RIGHT_COL, WEEKLY_WEEKS, 3).setFormulas(weekly);
+  st.getRange(WEEKLY_ROW, RIGHT_COL, WEEKLY_WEEKS, 6).setFormulas(weekly);
   st.getRange(WEEKLY_ROW, RIGHT_COL, WEEKLY_WEEKS, 1).setNumberFormat("yyyy-mm-dd");
+  st.getRange(WEEKLY_ROW, RIGHT_COL + 4, WEEKLY_WEEKS, 2).setNumberFormat("0.0%");
 
   // ── 版本與平台分布（動態，冒出沒預期的值也看得到）─────────────
   // 空狀態同樣先用 COUNTA 判斷。QUERY 對空範圍不會回 #N/A，
@@ -400,7 +412,32 @@ function dayDownloads(dl, row) {
   );
 }
 
-/** 某一週（起始日在 H 欄該列）的事件數 */
+/**
+ * 某一週的下載新增（週起始日在 col 欄該列），跨資產加總。
+ * 那一整週都沒抓到任何非空的差值就留空——與「當日下載」同一個原則：
+ * 沒抓到不等於 0。
+ */
+function weekDownloads(dl, row, col) {
+  var inWeek =
+    dl + '$A:$A,">="&$' + col + row + "," + dl + '$A:$A,"<"&$' + col + row + "+7";
+  return (
+    "=IF(COUNTIFS(" + inWeek + "," + dl + '$F:$F,"<>")=0,"",' +
+    "SUMIFS(" + dl + "$F:$F," + inWeek + "))"
+  );
+}
+
+/**
+ * 比率＝分子欄 ÷ 分母欄（同一列）。分母空白或 0 一律顯示「—」。
+ * @param den 分母欄字母  @param num 分子欄字母
+ */
+function rateFormula(den, num, row) {
+  return (
+    "=IF(OR($" + den + row + '="",$' + den + row + '=0),"—",$' +
+    num + row + "/$" + den + row + ")"
+  );
+}
+
+/** 某一週（起始日在 col 欄該列）的事件數 */
 function weekCount(q, event, row, col) {
   return (
     '=COUNTIFS(' + q + '$B:$B,"' + event + '",' +
