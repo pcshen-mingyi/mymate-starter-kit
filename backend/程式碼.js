@@ -438,6 +438,24 @@ var GITHUB_RELEASES_API =
 var DOWNLOAD_SHEET = "下載";
 
 /**
+ * 要追蹤的發佈來源。每個 repo 寫進自己的分頁，彼此完全獨立。
+ *
+ * 分頁刻意不共用：「較上次新增」是拿同一張表裡「最近一筆不是今天的同名資產」
+ * 來相減，兩個產品混在一張表雖然靠 (tag, 資產名稱) 也分得開，但「統計」分頁的
+ * 漏斗公式是整欄加總的——混進第二個產品的下載數，MYmate 的安裝率會被稀釋成
+ * 一個沒有意義的數字。分頁分開，既有公式一行都不用改。
+ *
+ * 新增產品就在這裡多加一列 {api, sheet}；分頁不存在會自動建立。
+ */
+var DOWNLOAD_SOURCES = [
+  { api: GITHUB_RELEASES_API, sheet: DOWNLOAD_SHEET },
+  {
+    api: "https://api.github.com/repos/pcshen-mingyi/ai-social-worker-pack/releases",
+    sheet: "下載-社工體驗包",
+  },
+];
+
+/**
  * 「統計日」與「抓取時間」是兩件事，必須分開存：
  *
  *   統計日    這一列的數字代表哪一天的狀態（as-of）。分析、漏斗、按日對齊都看這一欄。
@@ -474,10 +492,14 @@ var DOWNLOAD_TRIGGER_FN = "fetchDownloads";
  */
 var DOWNLOAD_TRIGGER_HOUR = 23;
 
-/** 「下載」分頁；不存在就建。舊欄位結構會自動升級，標題列改名也會補正 */
-function downloadSheet() {
+/**
+ * 下載分頁；不存在就建。舊欄位結構會自動升級，標題列改名也會補正。
+ * @param name 分頁名稱，省略時用 DOWNLOAD_SHEET（保留舊呼叫方式，setup() 仍能直接用）
+ */
+function downloadSheet(name) {
+  var target = name || DOWNLOAD_SHEET;
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(DOWNLOAD_SHEET) || ss.insertSheet(DOWNLOAD_SHEET);
+  var sh = ss.getSheetByName(target) || ss.insertSheet(target);
 
   // 舊結構（沒有「統計日」）→ 在最前面插一欄，並用抓取時間的日期回填。
   // 不能只換標題列，那會讓既有資料整排錯位。
@@ -511,24 +533,38 @@ function downloadSheet() {
 }
 
 /**
- * fetchDownloads()：抓 GitHub Release 的累計下載數，每個資產一天一列。
+ * fetchDownloads()：走訪 DOWNLOAD_SOURCES 的每個來源，各自抓取並寫入自己的分頁。
  * 由每日觸發器呼叫，也可以手動執行。同一天重複執行只會更新，不會新增重複列。
+ *
+ * 每個來源獨立處理：某個 repo 抓失敗（斷線、404、改名）只會跳過那一個，
+ * 其他來源照常寫入。這裡一樣不拋錯，避免每日觸發器寄失敗信。
  */
 function fetchDownloads() {
+  for (var s = 0; s < DOWNLOAD_SOURCES.length; s++) {
+    fetchOneSource(DOWNLOAD_SOURCES[s]);
+  }
+}
+
+/**
+ * 抓單一來源並寫入它自己的分頁。
+ * @param src {api, sheet}
+ */
+function fetchOneSource(src) {
+  var label = "下載追蹤[" + src.sheet + "]：";
   var res;
   try {
-    res = UrlFetchApp.fetch(GITHUB_RELEASES_API, {
+    res = UrlFetchApp.fetch(src.api, {
       muteHttpExceptions: true,
       headers: { Accept: "application/vnd.github+json" },
     });
   } catch (err) {
-    Logger.log("下載追蹤：連線失敗，本次跳過（不寫入）。" + err);
+    Logger.log(label + "連線失敗，本次跳過（不寫入）。" + err);
     return;
   }
 
   var code = res.getResponseCode();
   if (code !== 200) {
-    Logger.log("下載追蹤：GitHub 回應 " + code + "，本次跳過（不寫入）。");
+    Logger.log(label + "GitHub 回應 " + code + "，本次跳過（不寫入）。");
     return;
   }
 
@@ -536,11 +572,11 @@ function fetchDownloads() {
   try {
     releases = JSON.parse(res.getContentText());
   } catch (err) {
-    Logger.log("下載追蹤：JSON 解析失敗，本次跳過（不寫入）。");
+    Logger.log(label + "JSON 解析失敗，本次跳過（不寫入）。");
     return;
   }
   if (!releases || !releases.length) {
-    Logger.log("下載追蹤：沒有任何 Release，本次跳過（不寫入）。");
+    Logger.log(label + "沒有任何 Release，本次跳過（不寫入）。");
     return;
   }
 
@@ -550,10 +586,10 @@ function fetchDownloads() {
   var today = Utilities.formatDate(now, tz, "yyyy-MM-dd");
   var asOf = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // 統計日＝今天
 
-  var sh = downloadSheet();
+  var sh = downloadSheet(src.sheet);
   var plan = planDownloadWrites(readDownloadRows(sh, tz), releases, today);
   if (!plan.length) {
-    Logger.log("下載追蹤：Release 裡沒有任何資產可記錄，本次跳過（不寫入）。");
+    Logger.log(label + "Release 裡沒有任何資產可記錄，本次跳過（不寫入）。");
     return;
   }
 
@@ -572,7 +608,7 @@ function fetchDownloads() {
     ]);
   }
   Logger.log(
-    "下載追蹤：更新 " + countPlan(plan, true) + " 列、新增 " + countPlan(plan, false) + " 列。"
+    label + "更新 " + countPlan(plan, true) + " 列、新增 " + countPlan(plan, false) + " 列。"
   );
 }
 
