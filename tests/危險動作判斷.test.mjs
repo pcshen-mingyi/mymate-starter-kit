@@ -69,14 +69,34 @@ console.log("\n── 說明文字：算不出來要明講，不能編數字 ─
 {
   const hit = matchDestructive("git reset --hard HEAD~1");
   const scope = describeScope(hit, "git reset --hard HEAD~1");
-  ck("沒有可列舉目標時明講無法列出", scope.includes("無法自動列出"), scope);
+  ck("沒有可列舉目標時明講無法列出", scope.includes("無法自動列出影響範圍"), scope);
   ck("不會出現「約 N 個目標」這種假數字", !/約 \d+ 個目標/.test(scope), scope);
 }
 {
   const cmd = "rm a.txt b.txt c.txt";
   const scope = describeScope(matchDestructive(cmd), cmd);
   ck("能列舉時逐項列出", scope.includes("a.txt") && scope.includes("c.txt"), scope);
-  ck("數量正確（3 個）", scope.includes("這 3 個目標"), scope);
+  ck("三個以內全部列出，不顯示數量前綴", scope.startsWith("會影響：") && scope.includes("b.txt"), scope);
+}
+
+console.log("\n── heredoc：寫進檔案的內容不是要執行的指令 ──");
+{
+  const write = ["cat > tests/t.mjs <<'EOF'", "const cases = ['rm -rf /tmp/x'];", "EOF", "node tests/t.mjs"].join("\n");
+  const hit = matchDestructive(write);
+  ck("不會被誤判成 rm -rf", hit && !hit.label.includes("資料夾"), hit ? hit.label : "無命中");
+  ck("正確判定為寫入檔案", hit && hit.label.includes("覆蓋"), hit ? hit.label : "無命中");
+  ck("目標是被寫入的檔案，不是 heredoc 內容的詞",
+    describeScope(hit, write) === "會影響：tests/t.mjs", describeScope(hit, write));
+  ck("接給 bash 執行時仍會攔（內容真的會跑）",
+    matchDestructive("echo 'rm -rf /x' | bash") !== null);
+}
+
+console.log("\n── 訊息長度：太長就不會被讀 ──");
+{
+  const cmd = "rm a.txt b.txt c.txt d.txt e.txt f.txt";
+  const scope = describeScope(matchDestructive(cmd), cmd);
+  ck("多目標時壓成一行", !scope.includes("\n"), scope);
+  ck("最多列三個並說明還有幾個", scope.includes("…還有 3 個"), scope);
 }
 
 console.log(`\n結果：${pass} 通過、${fail} 失敗`);

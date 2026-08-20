@@ -28,12 +28,10 @@ if (cmd.trim()) {
     decide(
       "ask",
       [
-        `📤 即將對外送出：${hit.label}`,
+        `📤 這個動作會把東西送出去：${hit.label}`,
         ``,
-        `完整指令：${cmd}`,
-        ``,
-        `建議：確認收件人／目標網址正確，且內容不含個資再允許。`,
-        `不確定就選「拒絕」，請 Claude 先把要送出的內容列給你看。`,
+        `・對方會真的收到，送出去就收不回來`,
+        `・不確定就按「拒絕」，我可以先把要送出的內容列給你看`,
       ].join("\n")
     );
   }
@@ -43,16 +41,13 @@ if (cmd.trim()) {
 if (/^mcp__/.test(toolName)) {
   const hit = OUTBOUND_TOOL_PATTERNS.find((d) => d.re.test(toolName));
   if (hit) {
-    const preview = JSON.stringify(ti).slice(0, 300);
     decide(
       "ask",
       [
-        `📤 即將對外送出：${hit.label}`,
+        `📤 這個動作會把東西送出去：${hit.label}`,
         ``,
-        `使用工具：${toolName}`,
-        `內容預覽：${preview}`,
-        ``,
-        `建議：確認收件人與內容無誤再允許；這個動作對方會真的收到。`,
+        `・對方會真的收到，送出去就收不回來`,
+        `・不確定就按「拒絕」，我可以先把要送出的內容列給你看`,
       ].join("\n")
     );
   }

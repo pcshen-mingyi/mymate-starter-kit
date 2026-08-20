@@ -20,19 +20,14 @@ if (!cmd.trim()) passThrough();
 const hit = matchDestructive(cmd);
 if (!hit) passThrough();
 
-const head = hit.severe ? "🛑 高風險動作" : "⚠️ 這個動作可能無法復原";
+// 訊息設計：重點前置、條列為主、不重複完整指令。
+//
+// 舊版把「完整指令」與四行建議放在中間，使用者得捲到最下面才看到該怎麼做——
+// 而確認視窗本來就會在下半部顯示完整指令，重複一次只是把重點推遠。
+// 對沒有技術背景的人，訊息越長越不會讀，讀不到重點跟沒有警示一樣。
+const head = hit.severe ? "🛑" : "⚠️";
+const lines = [`${head} ${hit.label}`, ``, `・${describeScope(hit, cmd)}`];
+if (hit.severe) lines.push("・沒有復原鍵，做了就回不來");
+lines.push("・不確定就按「拒絕」，不會有任何損失");
 
-decide(
-  "ask",
-  [
-    `${head}：${hit.label}`,
-    ``,
-    describeScope(hit, cmd),
-    ``,
-    `完整指令：${cmd}`,
-    ``,
-    `按「拒絕」不會有任何損失，也不會把事情弄壞——我會停下來，可以再問我`,
-    `「這個指令會動到哪些檔案？」看清楚再決定。`,
-    `按「允許一次」只放行這一個指令，下次遇到同樣的動作還是會再問你。`,
-  ].join("\n")
-);
+decide("ask", lines.join("\n"));

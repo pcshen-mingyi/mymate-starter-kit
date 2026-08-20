@@ -67,51 +67,69 @@ export function removeTargets(cmd = "") {
   return out;
 }
 
+/**
+ * 把 heredoc 的內容拿掉再判斷。
+ *
+ * `cat > f.mjs <<'EOF' … EOF` 中間那一大段是**要寫進檔案的內容**，不是要執行的指令。
+ * 不拿掉的話，內容裡出現的 `rm -rf`（測試案例、說明文件都很常寫到）會被誤判成
+ * 真的要刪東西——實際踩過：建立測試檔的指令被判成「rm -rf，約 235 個目標」。
+ *
+ * 例外：內容被接給 shell 執行時（`| bash`、`| sh`）就真的會跑，那時不能忽略。
+ */
+export function stripHeredocs(cmd = "") {
+  if (/\|\s*(bash|sh|zsh|dash|python\d?)\b/.test(cmd)) return cmd;
+  return cmd.replace(
+    /<<-?\s*(['"]?)([A-Za-z_]\w*)\1[\s\S]*?(?:\n|^)\2[ \t]*(?=\n|$)/g,
+    " <<檔案內容已略過>> "
+  );
+}
+
 export const DESTRUCTIVE = [
   {
     re: /\brm\s+(-\S+\s+)*-\S*r\S*f/i,
-    label: "強制遞迴刪除整個資料夾（rm -rf）",
+    label: "刪掉整個資料夾，連裡面所有東西一起",
     severe: true,
     targets: removeTargets,
   },
-  { re: /\brm\b/, label: "刪除檔案（rm）", targets: removeTargets },
-  { re: /\bRemove-Item\b/i, label: "刪除檔案（Remove-Item）", targets: removeTargets },
+  { re: /\brm\b/, label: "刪掉檔案", targets: removeTargets },
+  { re: /\bRemove-Item\b/i, label: "刪掉檔案", targets: removeTargets },
   {
     re: /\bgit\s+reset\s+--hard/,
-    label: "捨棄所有未提交的修改（git reset --hard）",
+    label: "丟掉還沒存進版本紀錄的修改",
     severe: true,
   },
   {
     re: /\bgit\s+clean\s+-\S*f/,
-    label: "刪除所有未追蹤的檔案（git clean -f）",
+    label: "刪掉沒被版本控管的檔案",
     severe: true,
   },
   { re: /\btruncate\b/, label: "把檔案內容清空" },
-  { re: /\bdd\b[^|]*\bof=/, label: "用 dd 直接覆寫檔案／磁碟", severe: true },
+  { re: /\bdd\b[^|]*\bof=/, label: "直接覆寫檔案或磁碟", severe: true },
   {
     test: hasTruncatingRedirect,
-    label: "覆寫檔案內容（> 把輸出寫進檔案，原本的內容會被蓋掉）",
+    label: "覆蓋檔案內容，原本的內容會消失",
     targets: redirectTargets,
   },
 ];
 
 /** 找出第一個命中的規則；沒有就回 null */
 export function matchDestructive(cmd = "") {
-  return DESTRUCTIVE.find((d) => (d.test ? d.test(cmd) : d.re.test(cmd))) ?? null;
+  const c = stripHeredocs(cmd);
+  return DESTRUCTIVE.find((d) => (d.test ? d.test(c) : d.re.test(c))) ?? null;
 }
 
 /**
- * 產生「會影響什麼」的說明。
- * 列不出來就明講列不出來——**不要生成一個假的數字**。
+ * 產生一行「會影響什麼」。刻意壓成一行——訊息太長使用者就不會讀，
+ * 而讀不到重點跟沒有警示的效果一樣。
+ *
+ * 列不出來就明講列不出來，**不要生成一個假的數字**。
  * 具體但錯誤的數字比「無法判斷」更糟，因為它看起來很可信。
  */
-export function describeScope(hit, cmd = "", max = 5) {
-  const targets = typeof hit?.targets === "function" ? hit.targets(cmd) : [];
-  if (targets.length === 0) {
-    return "無法自動列出會影響哪些檔案（這不代表沒有影響，也不代表很多）。";
-  }
-  if (targets.length === 1) return `會影響：${targets[0]}`;
-  const shown = targets.slice(0, max).map((t) => `  ・${t}`);
-  const rest = targets.length > max ? `\n  ・…（其餘 ${targets.length - max} 個）` : "";
-  return `會影響這 ${targets.length} 個目標：\n${shown.join("\n")}${rest}`;
+export function describeScope(hit, cmd = "", max = 3) {
+  const c = stripHeredocs(cmd);
+  const targets = typeof hit?.targets === "function" ? hit.targets(c) : [];
+  if (targets.length === 0) return "無法自動列出影響範圍";
+  const shown = targets.slice(0, max).join("、");
+  if (targets.length <= max) return `會影響：${shown}`;
+  return `會影響 ${targets.length} 個：${shown}…還有 ${targets.length - max} 個`;
 }
