@@ -1,4 +1,4 @@
-# MYmate 小白包 v2.0
+# MYmate 小白包 v2.1
 
 給**第一次用 Claude Code** 的同事：下載這個資料夾、用 Claude Code 打開它，就可以開始用。
 打開後會有一位叫 **MYmate** 的 AI 使用小幫手帶你完成前置準備。
@@ -152,6 +152,7 @@ MYmate-小白包/
 │   │   └── safety-check/       危險動作前的安全檢查程序
 │   └── hooks/                  三道安全護欄（Node.js，雙平台通用）
 │       ├── _config.mjs         ← 要調整保護範圍改這裡
+│       ├── _destructive.mjs    危險動作的判斷規則（純函式，可單獨測試）
 │       ├── block-delete.mjs
 │       ├── block-sensitive.mjs
 │       └── confirm-send.mjs

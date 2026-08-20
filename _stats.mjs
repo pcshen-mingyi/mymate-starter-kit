@@ -23,7 +23,7 @@
 export const STATS_ENDPOINT =
   "https://script.google.com/macros/s/AKfycbwhadKhFTzavWrP3rCu9pW2qLy_D9TjS0Jk_mqvqjwlLGRJh4lujOGCusDzVzgMiuez/exec";
 
-export const BUNDLE_VERSION = "2.0";
+export const BUNDLE_VERSION = "2.1";
 
 /** 是否會送出（給安裝訊息顯示用） */
 export function statsEnabled() {
