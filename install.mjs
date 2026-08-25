@@ -20,6 +20,8 @@ import { homedir, platform } from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { sendStat, statsNotice } from "./_stats.mjs";
 
 const DRY = process.argv.includes("--dry-run");
@@ -78,6 +80,47 @@ const unionKeep = (mine, theirs = []) => {
 /** 我們自己 hook 的檔名（用於精準辨識，避免動到使用者的 hook） */
 const OUR_HOOK_FILES = ["block-delete.mjs", "block-sensitive.mjs", "confirm-send.mjs"];
 const isOurHook = (cmd = "") => OUR_HOOK_FILES.some((f) => String(cmd).includes(f));
+
+/**
+ * 護欄指令要用哪個 node。兩種寫法各有一種**靜默失敗**，所以要挑，不能亂寫死。
+ * （為什麼「靜默」很嚴重：護欄跑不起來時結束代碼是 127，而 PreToolUse 只把 2
+ * 當成「攔下這個動作」，其他非零值都當成「這個檢查壞了」→ 動作照樣執行。
+ * 檔案還在那裡，所以看起來像有保護。）
+ *
+ *   寫 `node`            → 依賴 PATH。node 若裝在非標準位置（例如免管理員權限
+ *                          解壓到家目錄），App 找不到它。
+ *   寫 process.execPath  → 版本綁死。實測在 Homebrew 上是
+ *                          `/opt/homebrew/Cellar/node/24.5.0/bin/node`，
+ *                          node 一升級這個路徑就消失。
+ *
+ * 取捨：**PATH 上找得到 node 就用 `node`**（代表它在系統標準位置，
+ * 桌面 App 也看得到——2026-08-05 在桌面版實測過可行），
+ * **找不到才寫死絕對路徑**（那是「解壓到家目錄」那條免管理員路線的唯一辦法）。
+ */
+function nodeInvocation() {
+  try {
+    const probe = platform() === "win32" ? "where node" : "command -v node";
+    const found = execSync(probe, { stdio: ["ignore", "pipe", "ignore"] })
+      .toString().split(/\r?\n/)[0].trim();
+    if (found && existsSync(found)) return "node";
+  } catch {
+    /* PATH 上沒有 → 往下用絕對路徑 */
+  }
+  return `"${process.execPath}"`;
+}
+const NODE_CMD = nodeInvocation();
+
+/**
+ * 組出護欄的執行指令。
+ *
+ * **路徑一定要加引號。** Windows 的 node 預設在 `C:\Program Files\nodejs\`（有空白），
+ * 使用者家目錄也常有空白（`C:\Users\PC Shen\`）。不加引號指令會被空白切開——
+ * 實測會變成「Cannot find module '/tmp/mymate'」這種錯誤，護欄整個不會執行。
+ * 這是舊版就存在的問題，任何使用者名稱含空白的 Windows 電腦都中。
+ */
+function hookCommand(scriptPath) {
+  return `${NODE_CMD} "${scriptPath}"`;
+}
 
 /**
  * 外科手術式合併：只碰我們管的欄位，其餘一律原封不動。
@@ -141,9 +184,8 @@ function mergeSettings(current, incoming, destDir) {
           .filter((h) => isOurHook(h.command))
           .map((h) => ({
             ...h,
-            command: String(h.command).replace(
-              /node\s+[^\s]*hooks[/\\]/,
-              `node ${path.join(destDir, "hooks")}${path.sep}`
+            command: hookCommand(
+              path.join(destDir, "hooks", OUR_HOOK_FILES.find((f) => String(h.command).includes(f)))
             ),
           }));
         if (!ours.length) continue;
@@ -154,8 +196,14 @@ function mergeSettings(current, incoming, destDir) {
           for (const h of ours) {
             const which = (c) => OUR_HOOK_FILES.find((f) => String(c).includes(f));
             const dup = same.hooks.find((e) => isOurHook(e.command) && which(e.command) === which(h.command));
-            if (dup) dup.command = h.command;
-            else { same.hooks.push(h); changes.push(`${event} 新增護欄`); }
+            if (dup) {
+              // 舊版是 `node x.mjs`（路徑沒加引號）→ 換成新寫法要說出來，
+              // 否則畫面顯示「沒有需要新增的項目」，使用者不知道其實有修好東西
+              if (dup.command !== h.command) {
+                dup.command = h.command;
+                changes.push(`${event} 護欄指令已修正（路徑加引號）`);
+              }
+            } else { same.hooks.push(h); changes.push(`${event} 新增護欄`); }
           }
         } else {
           out.hooks[event].push({ ...g, hooks: ours });
@@ -199,6 +247,10 @@ function verifyNoClobber(before, after) {
     if (!Array.isArray(groups)) continue;
     for (const g of groups)
       for (const h of g.hooks ?? []) {
+        // 我們自己的護欄不算「使用者原有的」——重複安裝時它的指令字串本來就會被改寫
+        // （例如從 `node x.mjs` 換成絕對路徑＋引號的寫法），那是預期行為，不是誤刪。
+        // 這個檢查存在的目的是保護**使用者自己的** hook。
+        if (isOurHook(h.command)) continue;
         const still = (after.hooks?.[ev] ?? []).some((ag) =>
           (ag.hooks ?? []).some((ah) => ah.command === h.command)
         );
