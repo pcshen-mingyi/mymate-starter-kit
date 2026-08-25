@@ -91,6 +91,50 @@ console.log("\n── heredoc：寫進檔案的內容不是要執行的指令 �
     matchDestructive("echo 'rm -rf /x' | bash") !== null);
 }
 
+console.log("\n── 引號裡的符號不是 shell 符號（實際踩過的誤判 3）──");
+{
+  // 原始案例：用 node -e 讀 docx 的文字，全程唯讀，被判成「覆蓋檔案內容，會影響 10 個」
+  const readDocx = [
+    'cd "/Users/x/AI 社工同事體驗包 v2/個案訪視紀錄工具包" && node -e \'',
+    'import("./shared/lib/zip.mjs").then(async ({readZip}) => {',
+    '  const entries = readZip("../個人工作/CASE-001 訪視逐字稿.docx");',
+    '  const docEntry = entries.find(e => e.name === "word/document.xml");',
+    '  const paras = docEntry.data.toString("utf8").split(/<\\/w:p>/).map(p => {',
+    '    return [...p.matchAll(/<w:t[^>]*>([^<]*)<\\/w:t>/g)].map(m => m[1]).join("");',
+    '  }).filter(t => t.trim().length > 0);',
+    '  console.log(paras.join("\\n"));',
+    "});'",
+  ].join("\n");
+  ck("node -e 唯讀讀取 docx 不該被攔", !flagged(readDocx), "被誤攔了");
+}
+const quoted = [
+  ["node -e 'const f = (a) => a + 1'", "箭頭函式的 => 不是重導向"],
+  ["python3 -c 'print(1 > 0)'", "比較運算子不是重導向"],
+  ['echo "a > b"', "引號裡的純文字"],
+  ["git log --format='%h %s' | head", "格式字串"],
+  ['grep -rn "rm -rf" .', "搜尋「rm -rf」這串字，不是要執行它"],
+  ['echo "會刪掉整個資料夾" ', "說明文字提到刪除"],
+];
+for (const [cmd, why] of quoted) ck(`${why}：${cmd}`, !flagged(cmd), "被誤攔了");
+
+console.log("\n── 但引號裡真的會被執行時，仍然要攔 ──");
+const reallyRuns = [
+  ["bash -c 'rm -rf /tmp/x'", "bash -c 的內容就是指令"],
+  ['sh -c "echo x > f.txt"', "sh -c 裡的重導向是真的"],
+  ['eval "rm -rf /tmp/x"', "eval 一定執行"],
+  ["echo 'rm -rf /x' | bash", "接給 bash"],
+];
+for (const [cmd, why] of reallyRuns) ck(`${why}：${cmd}`, flagged(cmd), "沒被攔到");
+ck("bash -c 'rm -rf' 判定為最高級別",
+  matchDestructive("bash -c 'rm -rf /tmp/x'")?.severe === true);
+
+console.log("\n── 引號還原：被引號包住的目標仍要列得出來 ──");
+ck('重導向目標在引號裡', redirectTargets('echo x > "my file.txt"')[0] === "my file.txt",
+  JSON.stringify(redirectTargets('echo x > "my file.txt"')));
+ck("刪除目標在引號裡", removeTargets('rm "my file.txt"')[0] === "my file.txt",
+  JSON.stringify(removeTargets('rm "my file.txt"')));
+ck("引號沒收尾時保守處理，該攔的照攔", flagged('echo x > out.txt "沒收尾'));
+
 console.log("\n── 訊息長度：太長就不會被讀 ──");
 {
   const cmd = "rm a.txt b.txt c.txt d.txt e.txt f.txt";
