@@ -154,9 +154,13 @@ Mac 是 `node-<版本>-darwin-arm64.tar.gz`（Apple 晶片）或 `-darwin-x64.ta
 3. **只從官方來源拿。** `winget` 的 `OpenJS.NodeJS.LTS`、Homebrew 的 `node`、
    或 `nodejs.org` 本身。不要從其他鏡像站或第三方網站下載。
 
-> **給維護者**：macOS 那條路的網址推導與壓縮檔結構已於 2026-08-26 實測；
-> **Windows 兩條路都還沒有在真的 Windows 上跑過**，是依官方文件與檔案結構寫的。
-> 第一次有 Windows 機器時請實跑一次並把結果補進 `CHANGELOG.md`。
+> **給維護者**（2026-08-26 的驗證狀態）：
+> - ✅ **Windows 第一條路（`winget`）在真的 Windows 上實測通過**，整段流程走得完。
+> - ❌ Windows 第二條路（找不到 winget 時的壓縮檔）**還沒跑過**。
+> - ❌ macOS 壓縮檔那條路**還沒跑過**（只驗到網址存在、頂層目錄只有一層）。
+>   注意這條在 Mac 上其實是**常見路徑**——Homebrew 是開發者才會裝的東西。
+>
+> 補測到的請把結果寫進 `CHANGELOG.md`，不要只留在對話裡。
 
 ### 0-4 確認真的裝好了
 

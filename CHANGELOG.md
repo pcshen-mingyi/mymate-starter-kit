@@ -23,10 +23,19 @@ v2.3 的做法是「沒有 Node.js 就停下來，請使用者自己去官網裝
 
 | 項目 | 狀態 |
 |---|---|
+| **Windows 第一條路（`winget`）整段流程** | ✅ **在真的 Windows 上實測通過**（v2.4-rc1） |
 | 從 `nodejs.org/dist/index.json` 推導最新 LTS（`v24.19.0`） | ✅ 實測 |
 | Windows zip 與 macOS tar.gz 的網址存在、大小 37 MB／50 MB | ✅ `curl -I` 實測 |
 | 壓縮檔只有一層頂層目錄 → `--strip-components=1` 正確 | ✅ 部分下載後 `tar -tzf` 檢查 |
-| Windows 的 `winget` 與解壓縮兩條路 | ❌ **沒有 Windows 機器，未實跑** |
+| 打包後中文檔名的 UTF-8 旗標、`backend/`／`tests/` 排除 | ✅ 36 個項目全數檢查 |
+| macOS 已有 node 的情形 | ✅ 一直在用 |
+| Windows 第二條路（找不到 winget → 壓縮檔） | ❌ 未實跑 |
+| macOS 壓縮檔那條路（沒有 Homebrew） | ❌ 未實跑。**注意這在 Mac 上是常見路徑**，Homebrew 只有開發者會裝 |
+
+**`winget` 成功但沒有驗到的東西**：winget 把 node 裝到 `C:\Program Files\nodejs\`，
+那個位置本來就在系統 PATH 上，所以 `install.mjs` 走的是「PATH 找得到 → 沿用 `node`」那一支。
+也就是說**「找不到 node 就寫死絕對路徑」那段邏輯這次沒被走到**，仍未驗證。
+要驗它得走第二條路（免管理員、解壓到使用者資料夾）。
 - `CLAUDE.md` 的安全底線加一條例外：裝 Node.js 走 `my-install` 第 0 步的同意流程即可，
   不必再跑一次 `safety-check`——同一件事問兩次只會讓人更不安
 
