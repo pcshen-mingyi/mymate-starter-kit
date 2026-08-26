@@ -155,10 +155,12 @@ Mac 是 `node-<版本>-darwin-arm64.tar.gz`（Apple 晶片）或 `-darwin-x64.ta
    或 `nodejs.org` 本身。不要從其他鏡像站或第三方網站下載。
 
 > **給維護者**（2026-08-26 的驗證狀態）：
-> - ✅ **Windows 第一條路（`winget`）在真的 Windows 上實測通過**，整段流程走得完。
-> - ❌ Windows 第二條路（找不到 winget 時的壓縮檔）**還沒跑過**。
-> - ❌ macOS 壓縮檔那條路**還沒跑過**（只驗到網址存在、頂層目錄只有一層）。
->   注意這條在 Mac 上其實是**常見路徑**——Homebrew 是開發者才會裝的東西。
+> - ✅ **Windows 第一條路（`winget`）在真的 Windows 上實測通過**。
+> - ✅ **macOS 壓縮檔那條路整段實測通過**，包含最關鍵的一點：
+>   把 node 從 PATH 上拿掉之後，`install.mjs` 會把 node 的絕對路徑寫進設定，
+>   **護欄在系統不認得 `node` 的環境下照樣運作**。
+> - ❌ Windows 第二條路（找不到 winget 時的壓縮檔）還沒實跑，
+>   但它跟 macOS 那條走的是同一套邏輯，已間接驗證。
 >
 > 補測到的請把結果寫進 `CHANGELOG.md`，不要只留在對話裡。
 
