@@ -150,7 +150,7 @@ node uninstall.mjs             # 實際還原
 乾淨的 Windows 與 macOS 都沒有內建 Node.js。
 
 **你不用自己處理**——MYmate 發現沒有 Node.js 時會問你要不要幫你裝，
-你說好它就會裝（官方版本，約 50 MB，3–5 分鐘，只需一次）。
+你說好它就會裝（官方版本，下載約 40–50 MB，3–5 分鐘，只需一次）。
 不想讓它動手也可以自己到 [nodejs.org](https://nodejs.org) 下載 **LTS** 版，
 跟一般軟體一樣下一步下一步裝完即可。
 

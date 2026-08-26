@@ -46,7 +46,7 @@ node --version
 >  由 Node.js 官方（OpenJS 基金會）維護，Claude Code 本身不會附帶它，
 >  所以這很正常，不是你哪裡做錯。
 >
->  **我可以直接幫你裝**，大約 3–5 分鐘、約 50 MB，只需要做這一次。
+>  **我可以直接幫你裝**，大約 3–5 分鐘、下載約 40–50 MB，只需要做這一次。
 >  裝的是官方版本，不會動到你其他軟體，之後想移除也可以。
 >
 >  要我現在幫你裝嗎？」
@@ -61,24 +61,48 @@ node --version
 **每跑一個指令前先預告一句**（會做什麼、可能跳出什麼視窗）。
 **一次只跑一個指令，不要用 `&&` 串起來。**
 
-#### Windows
-
-第一條路——用 Windows 內建的軟體安裝工具（Windows 10 1809 以後、Windows 11 都有）：
+#### Windows — 第一條路：系統內建的安裝工具
 
 ```
 winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements
 ```
 
-先跟他說：「等一下可能會跳出一個藍色視窗問你要不要允許安裝，那是 Windows 在確認，
-按『是』就好。」
+先跟他說：「等一下可能會跳出一個視窗問你要不要允許安裝，那是 Windows 在確認，按『是』就好。」
 
-**找不到 `winget`** → 走第二條路：下載官方壓縮檔解到你自己的使用者資料夾，
-**不需要管理員權限、不會跳出 UAC**。用 PowerShell 內建的指令，一步一步做，
-解壓到 `%LOCALAPPDATA%\Programs\nodejs`。
+Windows 10（1809 以後）與 Windows 11 都內建 `winget`。裝到 `C:\Program Files\nodejs\`。
 
-#### macOS
+#### Windows — 第二條路：官方壓縮檔（找不到 winget 時）
 
-先看有沒有 Homebrew：
+**不需要管理員權限、不會跳 UAC。** 四個指令，**一次跑一個**，每個都先預告。
+
+先問出最新 LTS 的版本號（會印出類似 `v24.19.0`）：
+
+```
+powershell -NoProfile -Command "(Invoke-RestMethod https://nodejs.org/dist/index.json | Where-Object {$_.lts} | Select-Object -First 1).version"
+```
+
+下載（把兩處 `<版本>` 換成上一步印出來的，例如 `v24.19.0`）：
+
+```
+powershell -NoProfile -Command "Invoke-WebRequest https://nodejs.org/dist/<版本>/node-<版本>-win-x64.zip -OutFile $env:TEMP\node-lts.zip"
+```
+
+解壓縮：
+
+```
+powershell -NoProfile -Command "Expand-Archive -Path $env:TEMP\node-lts.zip -DestinationPath $env:LOCALAPPDATA\Programs -Force"
+```
+
+確認（同樣換掉 `<版本>`）：
+
+```
+powershell -NoProfile -Command "& $env:LOCALAPPDATA\Programs\node-<版本>-win-x64\node.exe --version"
+```
+
+node 最後會在 `%LOCALAPPDATA%\Programs\node-<版本>-win-x64\node.exe`。
+**把這個完整路徑記住**，下面第 2、3 步要用它來跑 `install.mjs`。
+
+#### macOS — 先看有沒有 Homebrew
 
 ```
 brew --version
@@ -86,16 +110,38 @@ brew --version
 
 **有** → `brew install node`（不需要密碼）。
 
-**沒有** → 下載官方壓縮檔（`.tar.gz`）解到 `~/.local/nodejs`，
-**不需要管理員權限、不用輸入密碼**。
+**沒有** → 走官方壓縮檔，**不需要管理員權限、不用輸入密碼**。
 不要叫他裝 Homebrew（那是另一套工具，為了這件事裝它太重）。
+先看晶片是 Apple 還是 Intel：`uname -m`（`arm64` = Apple、`x86_64` = Intel），
+然後一次跑一個：
+
+```
+curl -fsSL -o "$HOME/Downloads/node-lts.tar.gz" "https://nodejs.org/dist/<版本>/node-<版本>-darwin-arm64.tar.gz"
+```
+
+```
+mkdir -p "$HOME/.local/nodejs"
+```
+
+```
+tar -xzf "$HOME/Downloads/node-lts.tar.gz" -C "$HOME/.local/nodejs" --strip-components=1
+```
+
+```
+"$HOME/.local/nodejs/bin/node" --version
+```
+
+（`--strip-components=1` 是必要的：壓縮檔裡只有一層 `node-v<版本>-darwin-arm64/`，
+不脫掉的話 node 會多埋一層。2026-08-26 檢查過結構確實如此。）
 
 #### 版本怎麼選
 
 要用 **LTS（長期支援版）**。`winget`／`brew` 會自己處理。
-走下載壓縮檔那條路時，從 `https://nodejs.org/dist/index.json` 找 `lts` 欄位
-不是 `false` 的最新一筆，再依這台電腦的架構挑檔案
-（Windows 通常是 `win-x64`；Mac 的 Apple 晶片是 `darwin-arm64`、Intel 是 `darwin-x64`）。
+走壓縮檔那條路時，版本號從 `https://nodejs.org/dist/index.json` 取——
+找 `lts` 欄位不是 `false` 的**第一筆**（那個清單是新到舊排序）。
+檔名規則：Windows 是 `node-<版本>-win-x64.zip`，
+Mac 是 `node-<版本>-darwin-arm64.tar.gz`（Apple 晶片）或 `-darwin-x64.tar.gz`（Intel）。
+下載量：Windows 約 37 MB、macOS 約 50 MB。
 
 ### 0-3 三條硬規則
 
@@ -107,6 +153,10 @@ brew --version
    要下載就下載成檔案，解壓縮，執行。
 3. **只從官方來源拿。** `winget` 的 `OpenJS.NodeJS.LTS`、Homebrew 的 `node`、
    或 `nodejs.org` 本身。不要從其他鏡像站或第三方網站下載。
+
+> **給維護者**：macOS 那條路的網址推導與壓縮檔結構已於 2026-08-26 實測；
+> **Windows 兩條路都還沒有在真的 Windows 上跑過**，是依官方文件與檔案結構寫的。
+> 第一次有 Windows 機器時請實跑一次並把結果補進 `CHANGELOG.md`。
 
 ### 0-4 確認真的裝好了
 
