@@ -35,10 +35,41 @@ export const SECRET_FILE_PATTERNS = [
 ];
 
 /**
- * 受保護的「個資」檔名關鍵字 —— NPO 情境，維持較寬的中文比對。
+ * 受保護的「個資」檔名關鍵字 —— NPO 情境。
  * 這類命中會要求人工確認（ask），不會直接封殺，避免誤判時完全無法工作。
+ *
+ * 中文維持較寬的比對：「個資」「捐款」這些字不會意外出現在程式檔名裡。
  */
-export const PII_FILE_PATTERNS = [/個資/, /捐款/, /名冊/, /個人資料/];
+const PII_PATTERNS_ZH = [/個資/, /捐款/, /名冊/, /個人資料/, /身分證/, /通訊錄/];
+
+/**
+ * 英文檔名的個資比對。**刻意跟中文用不同的規則**，兩個限制缺一不可：
+ *
+ * 1. **必須是「可能真的裝著一份名單」的檔案類型**（試算表、CSV、文件）。
+ *    英文單字比中文容易誤中——`member`、`contact`、`personal` 在原始碼裡
+ *    到處都是（`members.ts`、`contact-form.jsx`、`personal-settings.json`）。
+ *    這個包的歷史教訓就在上面那段註解裡：舊版用英文子字串比對，
+ *    結果在所有專案誤擋 `token.py`、`secrets.py` 這種再普通不過的檔案。
+ *    誤報多了，使用者就學會無腦按允許——**那比不擋更糟**。
+ * 2. **關鍵字要在檔名本身**（`[^/\\]*` 限制在同一層），不是路徑的任一層。
+ *
+ * 所以 `donor_list.xlsx` 會被攔、`members.ts` 不會。
+ */
+const PII_PATTERN_EN = new RegExp(
+  "\\b(" +
+    [
+      "donors?", "donation", "beneficiar", "recipients?",
+      "roster", "members?", "membership",
+      "attendees?", "participants?",
+      "personal[-_ ]?(info|data|details)",
+      "(contact|name|client|case|patient|student|staff|volunteer)[-_ ]?list",
+      "pii",
+    ].join("|") +
+    ")[^/\\\\]*\\.(xlsx?|xlsm|csv|tsv|numbers|ods|docx?|pages|pdf)$",
+  "i"
+);
+
+export const PII_FILE_PATTERNS = [...PII_PATTERNS_ZH, PII_PATTERN_EN];
 
 /** 兩者合起來就是「檔名層級的受保護樣式」 */
 export const PROTECTED_FILE_PATTERNS = [...SECRET_FILE_PATTERNS, ...PII_FILE_PATTERNS];
