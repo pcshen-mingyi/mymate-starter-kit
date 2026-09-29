@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * install.mjs —— 把這個資料夾的 .claude/ 安裝到「使用者層級」（家目錄），
- * 讓自動攔阻真正生效，並在任何資料夾都能用。
+ * 讓自動安全檢查真正生效，並在任何資料夾都能用。
  *
  * 跨平台：家目錄由 os.homedir() 判斷
  *   macOS   → ~/.claude/
@@ -38,6 +38,15 @@ const willBe = (m) => log(DRY ? `  · （試跑）將會${m}` : `  ✓ ${m}`);
 
 /** macOS／Windows 產生的垃圾檔，不要跟著裝進使用者設定區 */
 const isJunk = (name) => name === ".DS_Store" || name === "Thumbs.db";
+
+/**
+ * 「完全關掉再重開」兩個平台做法不同，只寫 Cmd+Q 等於沒告訴 Windows 使用者。
+ * Windows 關掉視窗後常常還在系統匣裡跑，設定就不會重新讀取。
+ */
+const restartHint = () =>
+  platform() === "win32"
+    ? "關掉視窗後，再確認工作列右下角沒有 Claude 的圖示還在背景"
+    : "Mac 按 Cmd+Q，只關視窗不夠";
 
 async function exists(p) {
   try { await fs.access(p); return true; } catch { return false; }
@@ -82,9 +91,9 @@ const OUR_HOOK_FILES = ["block-delete.mjs", "block-sensitive.mjs", "confirm-send
 const isOurHook = (cmd = "") => OUR_HOOK_FILES.some((f) => String(cmd).includes(f));
 
 /**
- * 護欄指令要用哪個 node。兩種寫法各有一種**靜默失敗**，所以要挑，不能亂寫死。
- * （為什麼「靜默」很嚴重：護欄跑不起來時結束代碼是 127，而 PreToolUse 只把 2
- * 當成「攔下這個動作」，其他非零值都當成「這個檢查壞了」→ 動作照樣執行。
+ * 安全檢查的指令要用哪個 node。兩種寫法各有一種**靜默失敗**，所以要挑，不能亂寫死。
+ * （為什麼「靜默」很嚴重：安全檢查跑不起來時結束代碼是 127，而 PreToolUse 只把 2
+ * 當成「攔下這個動作」，其他非零值都當成「這個步驟壞了」→ 動作照樣執行。
  * 檔案還在那裡，所以看起來像有保護。）
  *
  *   寫 `node`            → 依賴 PATH。node 若裝在非標準位置（例如免管理員權限
@@ -111,11 +120,11 @@ function nodeInvocation() {
 const NODE_CMD = nodeInvocation();
 
 /**
- * 組出護欄的執行指令。
+ * 組出安全檢查的執行指令。
  *
  * **路徑一定要加引號。** Windows 的 node 預設在 `C:\Program Files\nodejs\`（有空白），
  * 使用者家目錄也常有空白（`C:\Users\PC Shen\`）。不加引號指令會被空白切開——
- * 實測會變成「Cannot find module '/tmp/mymate'」這種錯誤，護欄整個不會執行。
+ * 實測會變成「Cannot find module '/tmp/mymate'」這種錯誤，安全檢查整個不會執行。
  * 這是舊版就存在的問題，任何使用者名稱含空白的 Windows 電腦都中。
  */
 function hookCommand(scriptPath) {
@@ -201,13 +210,13 @@ function mergeSettings(current, incoming, destDir) {
               // 否則畫面顯示「沒有需要新增的項目」，使用者不知道其實有修好東西
               if (dup.command !== h.command) {
                 dup.command = h.command;
-                changes.push(`${event} 護欄指令已修正（路徑加引號）`);
+                changes.push(`${event} 安全檢查的指令已修正（路徑加引號）`);
               }
-            } else { same.hooks.push(h); changes.push(`${event} 新增護欄`); }
+            } else { same.hooks.push(h); changes.push(`${event} 新增安全檢查`); }
           }
         } else {
           out.hooks[event].push({ ...g, hooks: ours });
-          changes.push(`${event} 新增護欄`);
+          changes.push(`${event} 新增安全檢查`);
         }
       }
     }
@@ -247,7 +256,7 @@ function verifyNoClobber(before, after) {
     if (!Array.isArray(groups)) continue;
     for (const g of groups)
       for (const h of g.hooks ?? []) {
-        // 我們自己的護欄不算「使用者原有的」——重複安裝時它的指令字串本來就會被改寫
+        // 我們自己的安全檢查不算「使用者原有的」——重複安裝時它的指令字串本來就會被改寫
         // （例如從 `node x.mjs` 換成絕對路徑＋引號的寫法），那是預期行為，不是誤刪。
         // 這個檢查存在的目的是保護**使用者自己的** hook。
         if (isOurHook(h.command)) continue;
@@ -352,12 +361,12 @@ async function main() {
 
   const problems = verifyNoClobber(current, merged);
   if (problems.length) {
-    console.error("\n✗ 安全檢查未通過，已中止（未修改任何檔案）：");
+    console.error("\n✗ 設定核對未通過，已中止（未修改任何檔案）：");
     problems.forEach((x) => console.error("   - " + x));
     console.error("\n請把上面訊息回報給維護者。");
     process.exit(1);
   }
-  ok("安全檢查通過：使用者原有設定完整保留");
+  ok("設定核對通過：你原有的設定完整保留");
 
   if (!DRY) {
     await fs.mkdir(DEST, { recursive: true });
@@ -395,7 +404,7 @@ async function main() {
   await sendStat("install", DRY);
 
   log("\n" + "━".repeat(56));
-  log(DRY ? " DRY RUN 結束，未修改任何檔案。" : " 安裝完成！請完全關掉 Claude App 再重開（Mac 按 Cmd+Q）。");
+  log(DRY ? " DRY RUN 結束，未修改任何檔案。" : ` 安裝完成！請完全關掉 Claude App 再重開（${restartHint()}）。`);
   log("━".repeat(56));
   const notice = statsNotice();
   if (notice) log("\n" + notice);

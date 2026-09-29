@@ -39,8 +39,23 @@ const ok = (m) => log(`  ✓ ${m}`);
 const warn = (m) => log(`  ! ${m}`);
 
 const isJunk = (n) => n === ".DS_Store" || n === "Thumbs.db";
+
+/** 「完全關掉再重開」兩個平台做法不同（同 install.mjs 的說明） */
+const restartHint = () =>
+  platform() === "win32"
+    ? "關掉視窗後，再確認工作列右下角沒有 Claude 的圖示還在背景"
+    : "Mac 按 Cmd+Q，只關視窗不夠";
 const pluginKeys = (v) =>
   Array.isArray(v) ? [...v] : v && typeof v === "object" ? Object.keys(v) : [];
+
+/**
+ * v3.0 以前會自動裝這個 plugin，v3.1 起不再安裝（理由見 CHANGELOG）。
+ *
+ * **但舊使用者的電腦裡它還在**，所以這裡不能跟著拿掉——`.claude/settings.json`
+ * 已經沒有 `enabledPlugins` 了，還原時若只看那份設定就會漏清。
+ * 這份清單只用於「偵測並清掉舊版留下的東西」，不會讓任何人新裝到它。
+ */
+const LEGACY_PLUGINS = ["claude-code-setup@claude-plugins-official"];
 
 async function exists(p) { try { await fs.access(p); return true; } catch { return false; } }
 async function readJson(p, fb = {}) {
@@ -127,9 +142,18 @@ async function main() {
       rmAutoInstall = !!rec.autoInstallEnabledPlugins;
     } else {
       warn("找不到安裝紀錄，改用「比對本包內容」推斷（可能移除你原本就有的同名規則）");
-      rmPlugins = new Set(pluginKeys(ourSettings.enabledPlugins));
+      // 本包現在已經不含 plugin 了，所以只比對內容會漏掉舊版裝的那個 →
+      // 這條路徑（也只有這條）要把 LEGACY_PLUGINS 補進來。
+      // 有安裝紀錄時不補：紀錄裡本來就有，而且照紀錄走才不會動到使用者自己裝的東西。
+      rmPlugins = new Set([...pluginKeys(ourSettings.enabledPlugins), ...LEGACY_PLUGINS]);
       rmPerms = ourSettings.permissions ?? {};
-      rmAutoInstall = ourSettings.autoInstallEnabledPlugins !== undefined;
+      // 本包已經不設 autoInstallEnabledPlugins 了，所以只看本包內容會永遠是 false，
+      // 舊使用者的那個就會留下來。**只有在他的設定裡真的有舊版 plugin 時**才一起清——
+      // 那是「這個開關是我們當初設的」夠強的證據；沒有那個 plugin 就不動，
+      // 以免刪掉使用者自己開的。
+      rmAutoInstall =
+        ourSettings.autoInstallEnabledPlugins !== undefined ||
+        LEGACY_PLUGINS.some((p) => pluginKeys(cur.enabledPlugins).includes(p));
     }
 
     // (a) plugin 開關
@@ -194,7 +218,7 @@ async function main() {
       }
       if (kept.length) cur.hooks[event] = kept; else delete cur.hooks[event];
     }
-    if (hookN) removed.push(`${hookN} 個護欄`);
+    if (hookN) removed.push(`${hookN} 個安全檢查`);
     if (createdByUs.has("hooks") && cur.hooks && !Object.keys(cur.hooks).length) delete cur.hooks;
 
     if (!DRY) await fs.writeFile(destSettings, JSON.stringify(cur, null, 2) + "\n", "utf8");
@@ -244,11 +268,15 @@ async function main() {
   }
 
   // 3. 檢查自動下載的 plugin（我們不自行刪除，但必須誠實告知）
+  //    v3.1 起本包不再帶任何 plugin，所以新使用者這一步一定是「沒有」。
+  //    仍然要檢查，是為了 v3.0 以前裝過的人——那個 plugin 還躺在他們電腦裡。
   step("檢查自動下載的 plugin");
-  const ourPluginNames = pluginKeys(ourSettings.enabledPlugins);
+  const ourPluginNames = [
+    ...new Set([...pluginKeys(ourSettings.enabledPlugins), ...LEGACY_PLUGINS]),
+  ];
   const foundPlugins = await detectDownloadedPlugins(ourPluginNames);
   if (foundPlugins.length) {
-    warn("下列 plugin 當初因為自動安裝設定而被下載到你的電腦：");
+    warn("下列 plugin 是舊版（v3.0 以前）自動下載到你電腦的：");
     foundPlugins.forEach((f) => log(`      ‧ ${f.name}   （位置：${f.where}）`));
     log("");
     log("    這些是 Claude 自己管理的檔案，本工具**不會**代為刪除，");
@@ -269,7 +297,7 @@ async function main() {
   await sendStat("uninstall", DRY);
 
   log("\n" + "━".repeat(56));
-  log(DRY ? " DRY RUN 結束，未修改任何檔案。" : " 還原完成！請完全關掉 Claude App 再重開（Mac 按 Cmd+Q）。");
+  log(DRY ? " DRY RUN 結束，未修改任何檔案。" : ` 還原完成！請完全關掉 Claude App 再重開（${restartHint()}）。`);
   log("━".repeat(56));
   const notice = statsNotice();
   if (notice) log("\n" + notice);

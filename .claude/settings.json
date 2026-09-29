@@ -1,9 +1,5 @@
 {
   "_note": "⚠️ 實測（2026-08-05）：桌面 App 下本檔案（專案層級）的 permissions 與 hooks 不生效（host 以 --setting-sources user 啟動）；裝到使用者層級 ~/.claude/ 才會生效。→ 在 my-install 執行前，安全防線是 CLAUDE.md 的安全底線 + safety-check skill 程序 + App 內建確認。終端機 CLI 啟動時本檔案正常生效。",
-  "autoInstallEnabledPlugins": true,
-  "enabledPlugins": [
-    "claude-code-setup@claude-plugins-official"
-  ],
   "permissions": {
     "deny": [
       "Bash(rm -rf *)",

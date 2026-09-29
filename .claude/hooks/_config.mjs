@@ -4,7 +4,7 @@
  *    ❌ 專案層級 .claude/settings.json 註冊 → 桌面 App 不執行（host 用 --setting-sources user）。
  *    → 桌面 App 使用者請執行 install.mjs（階段二）把本 hook 裝到使用者層級，才會真正生效。
  *
- * 共用設定與工具 —— 要調整護欄範圍，改這個檔案就好。
+ * 共用設定與工具 —— 要調整安全檢查的範圍，改這個檔案就好。
  * 跨平台：純 Node，不依賴 shell；路徑一律用 path 模組處理。
  */
 
